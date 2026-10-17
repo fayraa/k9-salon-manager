@@ -681,3 +681,66 @@ test('quick fill keeps line breaks in remarks and keeps focus on Fill blanks', a
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('a microchip save Google didn’t confirm, which did go through, can still be pressed again after a reload', async () => {
+  const { page, errors, ctx, calls } = await openApp({ version: 3 });
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('#top-act [data-action="quick-fill"]');
+  await page.waitForSelector('.qf-table');
+  await page.selectOption('#qf-what', 'chip');
+  await page.selectOption('#qf-which', 'all');
+  const NEW = '999333000100000';
+  await page.fill('#qf-0-0', NEW); // Biscuit
+  await page.evaluate(() => { window.__k9.failNext = 'timeout'; });
+  await page.click('#qf-save');
+  await page.waitForFunction(() => /won’t be saved twice/.test(document.querySelector('#qf-msg').textContent));
+  const after = readResponse({ version: 3 });
+  after.tabs['All Breeds'].rows[0].v[1] = NEW; // it did reach the sheet
+  const reads = (await calls()).filter(c => c.action === 'read').length;
+  await page.evaluate(r => { window.__k9.read = r; }, after);
+  await page.keyboard.press('F5');
+  await page.waitForFunction(n => window.__k9.calls.filter(c => c.action === 'read').length > n, reads);
+  await page.waitForTimeout(100);
+  assert.match(await page.textContent('#qf-count'), /^1 dog changed$/, 'the typed chip still belongs to Biscuit');
+  await page.click('#qf-save');
+  await page.waitForSelector('.toast');
+  const batches = (await calls()).filter(c => c.action === 'batch');
+  assert.equal(batches.length, 2);
+  assert.equal(batches[0].opId, batches[1].opId, 'sent again with the same ID, so it isn’t saved twice');
+  assert.equal(batches[0].opHash, batches[1].opHash);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('a licence swap Google didn’t confirm is sent again as the same group after a reload', async () => {
+  const { page, errors, ctx, calls } = await openApp({ version: 3 });
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('#top-act [data-action="quick-fill"]');
+  await page.waitForSelector('.qf-table');
+  await page.selectOption('#qf-which', 'all');
+  const m = await page.inputValue('#qf-1-0'), tf = await page.inputValue('#qf-3-0'); // Mochi and Toffee
+  await page.fill('#qf-1-0', tf);
+  await page.fill('#qf-3-0', m);
+  await page.fill('#qf-0-0', 'LIC-NEW'); // Biscuit
+  await page.evaluate(() => { window.__k9.failNext = 'timeout'; });
+  await page.click('#qf-save');
+  await page.waitForFunction(() => /won’t be saved twice/.test(document.querySelector('#qf-msg').textContent));
+  const after = readResponse({ version: 3 });
+  const rows = after.tabs['All Breeds'].rows;
+  rows[1].v[18] = tf; rows[3].v[18] = m; // the swap did reach the sheet
+  const reads = (await calls()).filter(c => c.action === 'read').length;
+  await page.evaluate(r => { window.__k9.read = r; }, after);
+  await page.keyboard.press('F5');
+  await page.waitForFunction(n => window.__k9.calls.filter(c => c.action === 'read').length > n, reads);
+  await page.waitForTimeout(100);
+  await page.click('#qf-save');
+  await page.waitForSelector('.toast');
+  const batches = (await calls()).filter(c => c.action === 'batch');
+  assert.deepEqual(batches.map(b => b.ops.length), [2, 2, 1]);
+  assert.equal(batches[0].opId, batches[1].opId);
+  assert.equal(batches[0].opHash, batches[1].opHash);
+  assert.match(batches[2].ops[0].dog, /Biscuit/);
+  assert.match(await page.textContent('.toasts'), /Saved 3 dogs/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

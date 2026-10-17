@@ -26,16 +26,21 @@ function qfIndex() {
   }
   return { byRow, byIdent };
 }
-/** The dog this entry belongs to now: the same animal ID and microchip (and name, if it has neither), or null. */
+/**
+ * The dog this entry belongs to now: the same animal ID and microchip (and name, if it has neither), or null.
+ * The microchip may be the one you typed, when that save already reached the sheet.
+ */
 function qfMatch(en, ix) {
-  const id = String(qfVal(en, 'Animal ID')).trim(), chip = normChip(qfVal(en, 'Microchip No.'));
-  const name = String(qfVal(en, 'Name')).trim();
-  const same = d => !!d && String(d.id).trim() === id && d.chip === chip && (id || chip || String(d.name).trim() === name);
+  const id = String(qfVal(en, 'Animal ID')).trim(), name = String(qfVal(en, 'Name')).trim();
+  const typed = en.edits.get('Microchip No.');
+  const chips = Array.from(new Set([normChip(qfVal(en, 'Microchip No.')), ...(typed ? [normChip(typed.v)] : [])]));
+  const same = d => !!d && String(d.id).trim() === id && chips.includes(d.chip) && (id || d.chip || String(d.name).trim() === name);
   const here = ix.byRow.get(en.r);
   if (same(here)) return here;
-  const list = (ix.byIdent.get(id + '\u0001' + chip) || []).filter(same);
+  const list = Array.from(new Set([].concat(...chips.map(ch => ix.byIdent.get(id + '\u0001' + ch) || [])))).filter(same);
   return list.length === 1 ? list[0] : null;
 }
+const qfPayload = chunk => ({ action: 'batch', ops: chunk.map(({ _en, _dog, ...op }) => op) });
 /** Columns of All Breeds a person can type into (not formulas, not the animal ID). */
 function qfEditable(t) {
   return t.headers.map((h, c) => c).filter(c => t.headers[c] && t.idx.get(t.headers[c]) === c && !t.formulaCols.has(c) && !isAutoCol(t, c) && t.kinds[c] !== 'datetime');
@@ -299,7 +304,11 @@ async function qfResync(o) {
     const d = qfMatch(en, ix);
     if (!d) { conflicts += en.edits.size; en.edits.clear(); continue; } // can’t tell which dog it is any more
     const fresh = { headers: S.db[MASTER].headers, v: d.row.v };
-    for (const h of Array.from(en.edits.keys())) if (!sameVal(S.db[MASTER].kinds[S.db[MASTER].idx.get(h)], qfVal(fresh, h), qfVal(en, h))) { en.edits.delete(h); conflicts++; }
+    for (const [h, e] of Array.from(en.edits)) {
+      const kind = S.db[MASTER].kinds[S.db[MASTER].idx.get(h)], now = qfVal(fresh, h);
+      if (sameVal(kind, now, e.v)) en.edits.delete(h); // already in the sheet
+      else if (!sameVal(kind, now, qfVal(en, h))) { en.edits.delete(h); conflicts++; }
+    }
     qfSnap(en, d);
   }
   qfDraw(o);
@@ -318,7 +327,14 @@ async function qfSave(o) {
   }
   const ops = qfOps(st, t);
   if (!ops.length) { qfCount(o); qfSay(o, 'Nothing has changed yet.', true); return; }
-  const chunks = qfChunks(ops, t);
+  // a group Google didn't confirm goes first, exactly as before, so its ID still stops it saving twice
+  let chunks = null;
+  const r = st.retry;
+  if (r && r.ens) {
+    const first = r.ens.map(en => ops.find(op => op._en === en));
+    if (first.every(Boolean) && hashOf(qfPayload(first)) === r.hash) { const rest = qfChunks(ops.filter(op => !first.includes(op)), t); chunks = rest && [first, ...rest]; }
+  }
+  if (!chunks) chunks = qfChunks(ops, t);
   if (!chunks) { qfSay(o, `More than ${QF_CHUNK} dogs are swapping microchips or licence numbers with each other. Save some of those changes first, then the rest.`, true); return; }
   const total = ops.length;
   const btn = $('#qf-save', o.el), fs = $('#qf-fs', o.el);
@@ -330,7 +346,7 @@ async function qfSave(o) {
   const skipped = [];
   for (const chunk of chunks) {
     qfSay(o, chunks.length > 1 ? `Saving… ${saved} of ${plural(total, 'dog')} done.` : `Saving ${plural(total, 'dog')}…`);
-    const payload = { action: 'batch', ops: chunk.map(({ _en, _dog, ...op }) => op) };
+    const payload = qfPayload(chunk);
     const hash = hashOf(payload);
     const opId = st.retry && st.retry.hash === hash ? st.retry.opId : newOpId();
     try {
@@ -341,7 +357,7 @@ async function qfSave(o) {
       saved += chunk.length;
     } catch (e) {
       // pressing Save again resends this group with the same ID, so it is never saved twice
-      st.retry = e.keepOp || e.code === 'locked' ? { opId, hash } : null;
+      st.retry = e.keepOp || e.code === 'locked' ? { opId, hash, ens: chunk.map(op => op._en) } : null;
       failure = { e, chunk };
       break;
     }

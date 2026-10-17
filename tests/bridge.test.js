@@ -475,3 +475,18 @@ test('a row with an unticked tick box can still be edited', () => {
   }
   assert.equal(ab.peek(2, 13).v, 'Checked ');
 });
+
+test('dropdown items saved with stray spaces are matched the same way the app is sent them', () => {
+  const { ss, ab } = fixture();
+  ab.cell(2, 9).rule = { type: 'VALUE_IN_LIST', values: [' Y ', 'N ', ' Pending'] };
+  const b = loadBridge(ss);
+  const read = b.post({ action: 'read', tabs: ['All Breeds'] });
+  assert.deepEqual(read.tabs['All Breeds'].rules[8].list, ['Y', 'N', 'Pending']);
+  const save = v => b.post({ action: 'save', tab: 'All Breeds', mode: 'edit', row: 2, changes: [{ h: 'Sterilised', k: 0, v, kind: 'text' }], expect: [{ h: 'Name', k: 0, v: 'Biscuit', kind: 'text' }] });
+  const bad = save('Maybe');
+  assert.equal(bad.error, 'invalid');
+  assert.match(bad.message, /only accepts: Y, N, Pending\./);
+  assert.equal(ab.peek(2, 9).v, undefined, 'nothing was written');
+  assert.equal(save('Y').ok, true, 'a choice the app offers is accepted');
+  assert.equal(ab.peek(2, 9).v, 'Y');
+});
