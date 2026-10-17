@@ -48,8 +48,9 @@ function drawerHTML(d) {
   qa.push(['Breeding Dog Movement', 'Movement'], ['Sterilisations', 'Sterilisation'], ['Deaths', 'Death']);
   // a record has a document when its link column holds one of the dog's documents; tabs with no link column use the row noted at upload
   const myDocs = docsFor(d), docUrls = new Set(myDocs.map(x => docUrl(x.id)));
-  const docRows = new Set(myDocs.filter(x => x.tab && x.row).map(x => `${x.tab}|${x.row}`));
-  const hasDoc = e => e.row.v.some(v => docUrls.has(String(v).trim())) || (docRows.has(`${e.L.tab}|${e.row.r}`) && !e.t.headers.some(h => /link$/i.test(h)));
+  // documents whose link isn't written anywhere in their tab fall back to the row noted at upload
+  const unwritten = new Set(myDocs.filter(x => x.tab && x.row && !((S.db[x.tab] || {}).rows || []).some(r => r.v.some(v => String(v).trim() === docUrl(x.id)))).map(x => `${x.tab}|${x.row}`));
+  const hasDoc = e => e.row.v.some(v => docUrls.has(String(v).trim())) || unwritten.has(`${e.L.tab}|${e.row.r}`);
   const photo = S.photos[d.key];
   const canPhoto = S.bridgeVersion >= NEED_BRIDGE && d.key;
   return `

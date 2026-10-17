@@ -56,6 +56,7 @@ function docsSectionHTML(d) {
   }).join('');
   return `<section class="sec" aria-labelledby="dr-docs"><h3 id="dr-docs">Documents · ${list.length}</h3>
     ${can ? '' : `<p class="note">${icon('info')}<span>Adding documents needs the newest bridge script. <button class="linkbtn" data-action="bridge-help">Update the bridge</button></span></p>`}
+    ${S.docsError ? `<p class="note">${icon('info')}<span>The list of documents couldn’t be read. Check the hidden “App Documents” tab in your sheet hasn’t been changed.</span></p>` : ''}
     ${papers}
     ${list.length ? `<ul class="docs">${rows}</ul>` : `<p class="muted" style="margin:0">No documents yet. Add photos or PDFs of vaccination records, certificates and import papers.</p>`}
     ${can ? `<div class="row"><button class="btn sm" data-action="doc-add" ${key}>${icon('plus')}Add a document</button></div>` : ''}</section>`;
@@ -203,7 +204,7 @@ async function submitDoc(o) {
       if (e.code === 'changed_after_save') {
         // the first press did save it: don't offer to save a second copy
         o.job.saving = false; closeTop(true);
-        toast('This document was already saved a moment ago. The list is reloading.');
+        toast('This document was saved a moment ago, but without your latest changes. Check it under Documents; to change it, remove it and add it again.', true);
         scheduleRefresh(300);
         return;
       }

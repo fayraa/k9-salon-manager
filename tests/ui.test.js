@@ -896,7 +896,21 @@ test('documents: an unconfirmed upload is sent again with the same ID, and one a
   await page.fill('#dc-note', 'changed my mind'); // a different request now, but the first one did go through
   await page.click('#dc-save');
   await page.waitForFunction(() => !document.querySelector('#dc-type'));
-  assert.match(await page.textContent('.toasts'), /already saved a moment ago/);
+  assert.match(await page.textContent('.toasts'), /saved a moment ago, but without your latest changes/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('documents: a list the bridge couldn’t read is reported, and nothing on this computer is cleared', async () => {
+  const read = readResponse({ version: 4 });
+  read.settings.checks.papers = true;
+  read.docs = null;
+  read.docsError = true;
+  const { page, errors, ctx } = await openApp({ read });
+  assert.doesNotMatch(await page.textContent('.attn'), /Import papers/, 'imported dogs aren’t flagged while the list can’t be read');
+  assert.equal(await page.evaluate(() => window.__k9.pruneKeep), undefined, 'local copies are kept');
+  await openDogDrawer(page, 'Luna');
+  assert.match(await page.textContent('section[aria-labelledby="dr-docs"]'), /couldn’t be read/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

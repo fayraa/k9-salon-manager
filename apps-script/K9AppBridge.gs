@@ -130,17 +130,18 @@ function read_(ss, wanted, limits) {
   const tabs = {};
   let photos = {};
   let docs = [];
+  let docsError = false;
   ss.getSheets().forEach(function (sh) {
     const name = sh.getName();
     if (name === PHOTO_TAB) { photos = photoIndex_(sh); return; }
-    if (name === DOC_TAB) { try { docs = docIndex_(sh); } catch (e) { docs = []; } return; } // a damaged list mustn't stop the app
+    if (name === DOC_TAB) { try { docs = docIndex_(sh); } catch (e) { docs = null; docsError = true; } return; } // a damaged list mustn't stop the app
     if (want && want.indexOf(name) < 0) return;
     const n = name === CHANGE_TAB ? CHANGE_LOG_LIMIT : Math.max(0, Math.min(50000, Number(lim[name]) || 0));
     tabs[name] = readTab_(sh, tz, n);
   });
   return {
     ok: true, title: ss.getName(), url: ss.getUrl(), tz: tz, version: BRIDGE_VERSION, tabs: tabs,
-    settings: getSettings_(), photos: photos, docs: docs, reminders: { installed: reminderTriggers_().length > 0 },
+    settings: getSettings_(), photos: photos, docs: docs, docsError: docsError, reminders: { installed: reminderTriggers_().length > 0 },
   };
 }
 
@@ -831,21 +832,25 @@ function photoGet_(ss, p) {
 
 /* ---------- documents (scans and PDFs of a dog's records) ---------- */
 
-/** The documents folder. One moved to the bin by hand is taken back out, so older documents stay reachable. */
+/**
+ * The documents folder. One moved to the bin by hand is taken back out, so older documents stay reachable.
+ * A new folder is made only if the old one can't be found twice running; the old one stays on the list.
+ */
 function docFolder_() {
   const props = PropertiesService.getScriptProperties();
   const id = props.getProperty('DOC_FOLDER_ID');
   if (id) {
-    try {
-      const f = DriveApp.getFolderById(id);
-      if (f.isTrashed()) f.setTrashed(false);
-      return f;
-    } catch (e) { /* deleted for good: make a new one */ }
+    for (let i = 0; i < 2; i++) {
+      try {
+        const f = DriveApp.getFolderById(id);
+        if (f.isTrashed()) f.setTrashed(false);
+        return f;
+      } catch (e) { if (i === 0) Utilities.sleep(800); }
+    }
   }
+  const before = docFolderIds_();
   const folder = DriveApp.createFolder(DOC_FOLDER);
-  props.setProperty('DOC_FOLDER_ID', folder.getId());
-  const all = docFolderIds_();
-  if (all.indexOf(folder.getId()) < 0) props.setProperty('DOC_FOLDER_IDS', JSON.stringify(all.concat(folder.getId()).slice(-20)));
+  props.setProperties({ DOC_FOLDER_IDS: JSON.stringify(before.concat(folder.getId()).slice(-20)), DOC_FOLDER_ID: folder.getId() });
   return folder;
 }
 /** Every documents folder the bridge has made, so files in an older one can still be opened. */
@@ -1036,6 +1041,10 @@ function docGet_(ss, p) {
   const sh = ss.getSheetByName(DOC_TAB);
   const none = { ok: false, error: 'server', message: 'That document isn’t on file any more.' };
   if (!id || !sh || !docIndex_(sh).some(function (d) { return d.id === id; })) return none;
+  try { // a documents folder moved to the bin by hand comes back out, with the files in it
+    const f = DriveApp.getFolderById(PropertiesService.getScriptProperties().getProperty('DOC_FOLDER_ID'));
+    if (f.isTrashed()) f.setTrashed(false);
+  } catch (e) { /* no folder yet */ }
   let file;
   try { file = DriveApp.getFileById(id); } catch (e) { return none; }
   if (file.isTrashed() || !docInFolder_(file)) return none;

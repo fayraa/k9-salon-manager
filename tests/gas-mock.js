@@ -34,6 +34,7 @@ const Utilities = {
     return new Date(Date.UTC(y, m - 1, d) - TZ_OFFSET[tz] * 36e5);
   },
   getUuid: () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, () => (Math.random() * 16 | 0).toString(16)),
+  sleep: () => {},
   base64Decode: s => Array.from(Buffer.from(s, 'base64')),
   base64Encode: bytes => Buffer.from(bytes).toString('base64'),
   newBlob: (bytes, mime, name) => new Blob_(bytes, mime, name),
@@ -169,7 +170,7 @@ function loadBridge(ss, extra = {}) {
     console: { log() {}, warn() {} },
     Utilities, JSON, Math, Date, Number, String, Object, Array, RegExp, Error, isFinite, isNaN, parseInt, parseFloat,
     SpreadsheetApp: { openById: id => { if (id !== 'TESTID') throw new Error('wrong id ' + id); return ss; }, flush() {} },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: k => (props.has(k) ? props.get(k) : null), setProperty: (k, v) => { if (String(v).length > 9000) throw new Error('property too large'); props.set(k, String(v)); }, deleteProperty: k => props.delete(k) }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => (props.has(k) ? props.get(k) : null), setProperty: (k, v) => { if (String(v).length > 9000) throw new Error('property too large'); props.set(k, String(v)); }, setProperties: o => { Object.keys(o).forEach(k => props.set(k, String(o[k]))); }, deleteProperty: k => props.delete(k) }) },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
     CacheService: { getScriptCache: () => ({ get: k => (cache.has(k) ? cache.get(k) : null), put: (k, v) => { if (String(v).length > 100000) throw new Error('too big'); cache.set(k, String(v)); } }) },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ setMimeType() { return this; }, getContent: () => s }) },

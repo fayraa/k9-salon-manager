@@ -375,7 +375,7 @@ function dogIssues(d) {
       if (flags.length) push('breeding', 'warn', `Breeding limit reached: ${flags.map(f => f.text).join('; ')}`);
     }
     if (evsFor(d.chip, 'Deaths').length) push('deceased', 'warn', 'Recorded in Deaths but status is Active');
-    if (C.papers && isImported(d)) {
+    if (C.papers && !S.docsError && isImported(d)) {
       const have = new Set(docsFor(d).map(x => x.type));
       const miss = IMPORT_PAPERS.filter(t => !have.has(t));
       if (miss.length) push('papers', 'warn', `Import papers not on file: ${miss.join(', ').toLowerCase()}`);

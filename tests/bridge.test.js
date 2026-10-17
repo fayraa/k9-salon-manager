@@ -653,3 +653,37 @@ test('documents: unusual animal IDs, picture checks, capitals in tab names and a
   assert.equal(r.ok, true, 'a damaged list doesn’t stop the app');
   assert.equal(r.docs.length, 3);
 });
+
+test('documents: a passing Drive error doesn’t start a new folder, and older folders stay usable', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  const first = b.post(docReq({}));
+  const folder = b.props.get('DOC_FOLDER_ID');
+  const real = b.ctx.DriveApp.getFolderById;
+  let fails = 1;
+  b.ctx.DriveApp.getFolderById = id => { if (fails-- > 0) throw new Error('Service error: Drive'); return real(id); };
+  b.post(docReq({ type: 'Licence' }));
+  assert.equal(b.props.get('DOC_FOLDER_ID'), folder, 'one failed lookup is tried again');
+  b.ctx.DriveApp.getFolderById = id => { if (id === folder) throw new Error('No item with the given ID'); return real(id); };
+  const next = b.post(docReq({ type: 'Pedigree or registration' }));
+  assert.notEqual(b.props.get('DOC_FOLDER_ID'), folder, 'a folder that is really gone is replaced');
+  assert.deepEqual(JSON.parse(b.props.get('DOC_FOLDER_IDS')), [folder, b.props.get('DOC_FOLDER_ID')], 'and the old one is remembered');
+  assert.equal(b.post({ action: 'doc_get', id: first.doc.id }).ok, true, 'so documents in it still open');
+  assert.equal(b.post({ action: 'doc_get', id: next.doc.id }).ok, true);
+});
+
+test('documents: opening one takes a binned folder back out, and a damaged list is reported, not emptied', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  const doc = b.post(docReq({}));
+  const folder = b.props.get('DOC_FOLDER_ID');
+  b.folders.get(folder).trashed = true;
+  assert.equal(b.post({ action: 'doc_get', id: doc.doc.id }).ok, true);
+  assert.equal(b.folders.get(folder).trashed, false);
+  const idx = ss.getSheetByName('App Documents');
+  idx.getRange = () => { throw new Error('Range not found'); };
+  const r = b.post({ action: 'read', tabs: ['All Breeds'] });
+  assert.equal(r.ok, true);
+  assert.equal(r.docs, null);
+  assert.equal(r.docsError, true);
+});
