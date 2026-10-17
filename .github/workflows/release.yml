@@ -1,11 +1,35 @@
 name: Release
+# Publishes a release when the version in package.json changes on main (or when run by hand).
+# Installed apps read releases/latest/download/latest.json to update themselves.
 on:
   push:
-    tags: ['v*.*.*']
+    branches: [main]
+    paths: ['package.json', '.github/workflows/release.yml']
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      needed: ${{ steps.v.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(node -p "require('./package.json').version")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"; echo "v$v is already released."
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"; echo "v$v will be released."
+          fi
   release:
+    needs: check
+    if: needs.check.outputs.needed == 'true'
     runs-on: ubuntu-latest
     # Add yourself as a required reviewer for this environment in GitHub (Settings → Environments → release)
     # so no release reaches installed apps until you approve it.
@@ -16,8 +40,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Tag matches package.json
-        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
       - run: sudo apt-get update && sudo apt-get install -y nsis
       - run: npm ci
       - run: npm run check
@@ -31,7 +53,7 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "dist/K-9-Salon-Manager-Setup-${GITHUB_REF_NAME#v}.exe" dist/latest.json \
-            --title "K-9 Salon Manager ${GITHUB_REF_NAME#v}" --notes-file dist/release-notes.md
+          gh release create "v$VERSION" "dist/K-9-Salon-Manager-Setup-$VERSION.exe" dist/latest.json \
+            --target "$GITHUB_SHA" --title "K-9 Salon Manager $VERSION" --notes-file dist/release-notes.md

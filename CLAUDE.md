@@ -26,10 +26,11 @@ Google Sheet through a Google Apps Script web app ("the bridge", `apps-script/K9
 - Keep UI text plain and short. Keep keyboard access, focus handling and the high-contrast mode working.
 
 ## Releases (maintainer only)
-Bump `version` in `package.json`, add a `## x.y.z` section to `CHANGELOG.md`, commit to `main`, then push a tag
-`vx.y.z`. The release workflow builds the installer and publishes it with `latest.json`, which installed apps
-read to update themselves.
+Bump `version` in `package.json`, add a `## x.y.z` section to `CHANGELOG.md`, and commit to `main`. The release
+workflow sees the new version, builds the installer and publishes `vx.y.z` with `latest.json`, which installed apps
+read to update themselves. If the `release` environment has a required reviewer, it waits for their approval.
 
 ## Weekly automated check (Claude)
-Work on a branch named `weekly-check/YYYY-MM-DD` and open a pull request. Never push to `main`, never create
-tags or releases, never merge. If nothing needs fixing, don't open a pull request; just report.
+Work on a branch named `weekly-check/YYYY-MM-DD` and open a pull request. Never push to `main`, never change the
+version in `package.json`, never create tags or releases, never merge. If nothing needs fixing, don't open a pull
+request; just report.

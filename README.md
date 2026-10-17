@@ -55,7 +55,7 @@ npm start          # run the app
 npm run dist       # Windows app + installer (needs makensis)
 ```
 
-Releases are built by GitHub Actions when a `vx.y.z` tag is pushed. Installed apps check
+Releases are built by GitHub Actions when the version in `package.json` changes on `main`. Installed apps check
 `releases/latest/download/latest.json`, download the installer, verify its SHA-256 and install it silently
 when you choose to restart.
 
