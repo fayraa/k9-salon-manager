@@ -27,10 +27,35 @@ function dogsDatalist(id = 'dl-dogs', filter = () => true) {
 }
 const isAutoCol = (t, c) => SEQ_COL.test(t.headers[c]) || (t.name === MASTER && t.headers[c] === 'Animal ID');
 
+/** The sheet's dropdown or tick-box rule on a column, when the bridge sends one (version 3). */
+const ruleOf = (t, c) => (t && t.rules && t.rules[c]) || null;
+/**
+ * What a column can hold. {select, kind, bool, options} is a fixed list, {suggest} is free typing with
+ * suggestions, null is free typing. The sheet's own dropdown wins over the app's built-in lists.
+ */
+function choicesFor(t, c, value) {
+  const h = t.headers[c], k = t.kinds[c], r = ruleOf(t, c);
+  if (['chip', 'date', 'time', 'datetime', 'url'].includes(k)) return null;
+  const uniq = a => Array.from(new Set(a.filter(x => x !== '' && x != null).map(String)));
+  const cur = value ? [value] : [];
+  const kind = ['status', 'sex', 'number'].includes(k) ? k : 'text';
+  if (r && r.checkbox) return r.values ? { select: true, kind: 'text', options: uniq([...cur, ...r.values]) } : { select: true, kind: 'bool', bool: true, options: uniq(['TRUE', 'FALSE', ...cur]) };
+  if (r && r.list && r.list.length) return r.strict === false ? { suggest: uniq([...r.list, ...suggestions(t, h)]) } : { select: true, kind, options: uniq([...cur, ...r.list]) };
+  if (k === 'yesno') return (t.types[c] || {}).b > 0 ? { select: true, kind: 'bool', bool: true, options: uniq(['TRUE', 'FALSE', ...cur]) } : { select: true, kind: 'text', options: uniq([...cur, 'Yes', 'No', ...suggestions(t, h)]) };
+  if (k === 'status') return { select: true, kind, options: uniq([...cur, ...STATUS_OPTS, ...suggestions(t, h)]) };
+  if (k === 'sex') return { select: true, kind, options: uniq([...cur, 'F', 'M', ...suggestions(t, h)]) };
+  return null;
+}
+function choiceLabel(ch, o) { return ch.bool ? (o === 'TRUE' ? 'Yes' : o === 'FALSE' ? 'No' : o) : ch.kind === 'sex' ? (o === 'F' ? 'F (female)' : o === 'M' ? 'M (male)' : o) : o; }
+function selectHTML(ch, value, attrs, blank) {
+  return `<select class="sel" ${attrs} data-kind="${ch.kind}"><option value="" ${value ? '' : 'selected'}>${esc(blank)}</option>${ch.options.map(o => `<option value="${esc(o)}" ${o === value ? 'selected' : ''}>${esc(choiceLabel(ch, o))}</option>`).join('')}</select>`;
+}
+
 function fieldHTML(t, c, value, opts) {
   const h = t.headers[c], k = t.kinds[c], id = `${opts.prefix || 'f'}-${c}`;
   const computed = opts.computed.has(c);
   const wide = k === 'long' || k === 'url';
+  const ch = choicesFor(t, c, value);
   let control;
   if (computed) control = `<div class="calc">${esc(fmtVal(value, k) || 'Filled in by the sheet')}</div><span class="hint">Worked out by a formula in the sheet</span>`;
   else if (opts.readOnly) control = `<div class="calc solid">${esc(fmtVal(value, k) || '—')}</div>`;
@@ -47,15 +72,13 @@ function fieldHTML(t, c, value, opts) {
     }
   }
   else if (k === 'time' && (!value || /^\d{1,2}:\d{2}$/.test(value))) control = `<input class="inp" type="time" id="${id}" data-col="${c}" data-kind="time" value="${esc(value ? value.padStart(5, '0') : '')}">`;
-  else if (k === 'sex') { const opt = Array.from(new Set([...(value ? [value] : []), 'F', 'M', ...suggestions(t, h)])); control = `<select class="sel" id="${id}" data-col="${c}" data-kind="sex"><option value="">Choose…</option>${opt.map(o => `<option value="${esc(o)}" ${o === value ? 'selected' : ''}>${esc(o === 'F' ? 'F (female)' : o === 'M' ? 'M (male)' : o)}</option>`).join('')}</select>`; }
-  else if (k === 'yesno') { const bool = (t.types[c] || {}).b > 0; const opt = bool ? Array.from(new Set(['TRUE', 'FALSE', ...(value ? [value] : [])])) : Array.from(new Set([...(value ? [value] : []), 'Yes', 'No', ...suggestions(t, h)])); control = `<select class="sel" id="${id}" data-col="${c}" data-kind="${bool ? 'bool' : 'text'}"><option value="">Choose…</option>${opt.map(o => `<option value="${esc(o)}" ${o === value ? 'selected' : ''}>${esc(bool ? (o === 'TRUE' ? 'Yes' : 'No') : o)}</option>`).join('')}</select>`; }
-  else if (k === 'status') { const opt = Array.from(new Set([...(value ? [value] : []), ...STATUS_OPTS, ...suggestions(t, h)])); control = `<select class="sel" id="${id}" data-col="${c}" data-kind="status"><option value="" ${value ? '' : 'selected'}>No status</option>${opt.map(o => `<option value="${esc(o)}" ${o === value ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`; }
+  else if (ch && ch.select) control = selectHTML(ch, value, `id="${id}" data-col="${c}"`, k === 'status' ? 'No status' : 'Choose…');
   else if (k === 'chip') control = `<input class="inp chip" id="${id}" data-col="${c}" data-kind="chip" inputmode="numeric" list="dl-dogs" value="${esc(value)}" placeholder="Type or scan a microchip" autocomplete="off"><span class="hint" data-chip-hint="${c}" aria-live="polite">${(() => { const d = BYCHIP.get(normChip(value)); return d ? esc(`${dogLabel(d)} · ${titleCase(d.breed)}`) : (t.name === MASTER && h === 'Microchip No.' ? '15 digits for an ISO microchip' : 'Choose a dog to fill in the details'); })()}</span>`;
   else if (k === 'number' && (!value || isFinite(+value))) control = `<input class="inp" type="number" step="any" id="${id}" data-col="${c}" data-kind="number" value="${esc(value)}">`;
   else if (k === 'long') control = `<textarea class="inp" id="${id}" data-col="${c}" data-kind="long">${esc(value)}</textarea>`;
   else if (k === 'url') control = `<input class="inp" type="url" id="${id}" data-col="${c}" data-kind="url" value="${esc(value)}" placeholder="https://">`;
   else if (k === 'datetime') control = `<div class="calc solid">${esc(fmtVal(value, k) || '—')}</div>`;
-  else { const sg = suggestions(t, h); control = `<input class="inp" id="${id}" data-col="${c}" data-kind="text" value="${esc(value)}" ${sg.length ? `list="dl-${id}"` : ''} autocomplete="off">${sg.length ? `<datalist id="dl-${id}">${sg.map(s => `<option value="${esc(s)}"></option>`).join('')}</datalist>` : ''}`; }
+  else { const sg = ch && ch.suggest ? ch.suggest : suggestions(t, h); control = `<input class="inp" id="${id}" data-col="${c}" data-kind="text" value="${esc(value)}" ${sg.length ? `list="dl-${id}"` : ''} autocomplete="off">${sg.length ? `<datalist id="dl-${id}">${sg.map(s => `<option value="${esc(s)}"></option>`).join('')}</datalist>` : ''}`; }
   const req = opts.required.has(c) ? ' <span class="req" aria-hidden="true">*</span><span class="sr">(required)</span>' : '';
   const isLabelled = !computed && !opts.readOnly && !(isAutoCol(t, c)) && k !== 'datetime';
   return `<div class="field${wide ? ' wide' : ''}">${isLabelled ? `<label for="${id}">${esc(h)}${req}</label>` : `<span class="flabel">${esc(h)}</span>`}${control}</div>`;

@@ -11,7 +11,8 @@ function openLitter(damChip) {
   if (needBridge('Recording a litter')) return;
   if (!S.db[LITTER_TAB]) { toast(`The sheet has no “${LITTER_TAB}” tab.`, true); return; }
   const colours = Array.from(new Set(DOGS.map(d => d.colour).filter(Boolean))).sort();
-  const breeds = Array.from(new Set(DOGS.map(d => d.breed).filter(Boolean))).sort();
+  const breedRule = ruleOf(S.db[MASTER], S.db[MASTER].idx.get('Breed'));
+  const breeds = Array.from(new Set([...((breedRule && breedRule.list) || []), ...DOGS.map(d => d.breed)].filter(Boolean))).sort();
   const kns = kennelList();
   const o = modal('litter', {
     title: 'Record a litter', wide: true, form: true,
@@ -110,6 +111,8 @@ async function submitLitter(o, pups) {
   const addPups = $('#lt-add', o.el).checked;
   const breed = v('lt-breed');
   if (addPups && !breed) return say('Please enter the breed for the puppies.', true, 'lt-breed');
+  const br = ruleOf(S.db[MASTER], S.db[MASTER].idx.get('Breed'));
+  if (addPups && br && br.list && br.strict !== false && !br.list.includes(breed)) return say(`“${breed}” isn’t in the Breed dropdown in your sheet, so Google would refuse it. Pick a breed from the list, or add it to the dropdown in the sheet first.`, true, 'lt-breed');
   const missingSex = pups.findIndex(p => !p.sex);
   if (missingSex >= 0) return say(`Choose the sex for puppy ${missingSex + 1}.`, true, `pp-sex-${missingSex}`);
   const chips = pups.map(p => normChip(p.chip)).filter(Boolean);

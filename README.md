@@ -14,6 +14,8 @@ It installs for your Windows user only and adds Start menu and desktop shortcuts
 - **Dogs**: search and filter every dog, or see them **by kennel** with capacity. Each dog has a profile with
   photo, microchip, to-do list, breeding history, offspring and every record, plus a **health record PDF**.
 - **Log for many dogs**: one vaccination or deworming for a whole group, one row per dog.
+- **Quick fill**: type a detail such as licence number, kennel or sterilised straight down a list of dogs, then save
+  them all at once.
 - **Record a litter**: the litter plus every puppy in one step, parents linked, IDs given automatically.
 - **Breeding**: dams, who's expecting, and eligibility under the rules you set from your licence conditions.
 - **Reports**: a monthly summary to help with your AVS submission (save as PDF, mark as submitted),
@@ -41,7 +43,7 @@ in your Apps Script project, run `setupAppBridge` once to approve any new permis
 
 Bridge version 2 adds: saving many rows at once, animal IDs given by the sheet, an **App Change Log** tab,
 an **App Photos** tab (hidden) with photos in a **K-9 Salon Dog Photos** Drive folder, shared settings,
-and the daily reminder email.
+and the daily reminder email. Version 3 also sends the sheet's dropdown lists, so the app offers the same choices.
 
 ## For developers
 See [CLAUDE.md](CLAUDE.md) for the layout, commands and rules. In short:

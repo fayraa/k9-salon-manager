@@ -1,5 +1,5 @@
 /**
- * K-9 Salon App Bridge (version 2)
+ * K-9 Salon App Bridge (version 3)
  * Lets the K-9 Salon Manager desktop app read and save your kennel records sheet.
  * This script runs in your own Google account. It does not touch your Pet Tools script.
  *
@@ -23,7 +23,7 @@
  */
 
 const SPREADSHEET_ID = '__SHEET_ID__';
-const BRIDGE_VERSION = 2;
+const BRIDGE_VERSION = 3;
 const CHANGE_TAB = 'App Change Log';
 const CHANGE_HEADERS = ['Time', 'Person', 'Action', 'Tab', 'Row', 'Dog', 'Field', 'Before', 'After'];
 const CHANGE_LOG_LIMIT = 400;
@@ -137,9 +137,10 @@ function read_(ss, wanted, limits) {
 function readTab_(sh, tz, limit) {
   const lastRow = sh.getLastRow();
   const lastCol = sh.getLastColumn();
-  const info = { headers: [], rows: [], formulaCols: [], lastRow: 1, maxRows: sh.getMaxRows() };
+  const info = { headers: [], rows: [], formulaCols: [], lastRow: 1, maxRows: sh.getMaxRows(), rules: {} };
   if (lastRow < 1 || lastCol < 1) return info;
   info.headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h); });
+  info.rules = rulesOf_(sh, lastRow, lastCol);
   if (lastRow < 2) return info;
   const ci = colInfo_(sh, lastRow, lastCol);
   info.formulaCols = ci.computed;
@@ -162,6 +163,43 @@ function readTab_(sh, tz, limit) {
   }
   info.lastRow = last;
   return info;
+}
+
+/**
+ * The dropdown and tick-box rules on each column, so the app offers the same choices as the sheet.
+ * Taken from the first data row, and from the last one for columns with no rule in the first.
+ * Long lists (over 100 choices, such as lists of microchips) are left out.
+ */
+function rulesOf_(sh, lastRow, lastCol) {
+  const out = {};
+  const maxRows = sh.getMaxRows();
+  [2, lastRow].forEach(function (r, i) {
+    if (r < 2 || r > maxRows || (i === 1 && r === 2)) return;
+    const rules = sh.getRange(r, 1, 1, lastCol).getDataValidations()[0];
+    for (let c = 0; c < lastCol; c++) {
+      if (out[c] || !rules[c]) continue;
+      const x = describeRule_(rules[c]);
+      if (x) out[c] = x;
+    }
+  });
+  return out;
+}
+
+function describeRule_(rule) {
+  try {
+    const type = String(rule.getCriteriaType());
+    const args = rule.getCriteriaValues() || [];
+    if (type === 'CHECKBOX') return { checkbox: true, values: args.length ? args.map(String) : null };
+    let list = null;
+    if (type === 'VALUE_IN_LIST') list = (args[0] || []).map(String);
+    else if (type === 'VALUE_IN_RANGE' && args[0] && args[0].getDisplayValues) list = [].concat.apply([], args[0].getDisplayValues()).map(String);
+    if (!list) return null;
+    list = list.map(function (s) { return s.trim(); }).filter(function (s, i, a) { return s && a.indexOf(s) === i; });
+    if (!list.length || list.length > 100) return null;
+    return { list: list, strict: !rule.getAllowInvalid() };
+  } catch (e) {
+    return null;
+  }
 }
 
 const TIME_ONLY = {};
@@ -471,13 +509,14 @@ function ruleProblem_(rule, v) {
     if (rule.getAllowInvalid()) return '';
     const type = String(rule.getCriteriaType());
     const args = rule.getCriteriaValues() || [];
-    const text = String(v).replace(/^'/, '');
+    const text = String(v).replace(/^'/, '').trim();
+    const trim = function (s) { return String(s).trim(); }; // the same as the lists the app is sent
     if (type === 'VALUE_IN_LIST') {
-      const list = (args[0] || []).map(String);
+      const list = (args[0] || []).map(trim);
       return list.indexOf(text) >= 0 ? '' : 'only accepts: ' + list.slice(0, 12).join(', ') + '.';
     }
     if (type === 'VALUE_IN_RANGE' && args[0] && args[0].getDisplayValues) {
-      const list = [].concat.apply([], args[0].getDisplayValues()).map(String).filter(String);
+      const list = [].concat.apply([], args[0].getDisplayValues()).map(trim).filter(String);
       return list.indexOf(text) >= 0 ? '' : 'only accepts: ' + list.slice(0, 12).join(', ') + '.';
     }
     if (type === 'CHECKBOX') {
@@ -929,6 +968,7 @@ function same_(cur, expected, kind) {
   const a = canon_(cur);
   const b = canon_(expected);
   if (a === b) return true;
+  if ((a === '' && b === 'FALSE') || (a === 'FALSE' && b === '')) return true; // an unticked box reads as blank or FALSE
   if (kind === 'date' || kind === 'datetime') {
     const da = isoDay_(a);
     return !!da && da === isoDay_(b);

@@ -17,7 +17,7 @@ const dogs = NAMES.map((name, i) => {
 });
 dogs.push(['T021', chip(20), '', 'MALTIPOO', 'CREAM', 'F', ago(40), '1 month', '', 'Test Kennel', '', 'Active', '', '', '', 'Bred in-house', chip(0), chip(2), '', '']);
 dogs.push(['T022', chip(21), 'Olive', 'MALTESE', 'WHITE', 'F', ago(900), '2y', '', 'Test Kennel', '2', '', 'A very long remark', '', '', 'Local breeder', '', '', '', '']);
-const rows = list => list.map((v, i) => ({ r: i + 2, v }));
+const rows = list => list.map((v, i) => ({ r: i + 2, v: v.slice() })); // copies, so one test's changes don't leak into the next
 
 function readResponse({ version = 2, settings } = {}) {
   const tabs = {
@@ -37,6 +37,15 @@ function readResponse({ version = 2, settings } = {}) {
     'Staff Register': { headers: ['Staff Name', 'Role / Duties', 'Date Joined', 'Status'], rows: rows([['Sam Tester', 'Kennel hand', ago(900), 'Active']]), formulaCols: [], lastRow: 2, maxRows: 1000 },
   };
   if (version >= 2) tabs['App Change Log'] = { headers: ['Time', 'Person', 'Action', 'Tab', 'Row', 'Dog', 'Field', 'Before', 'After'], rows: rows([['2026-10-01 09:00', 'Sam Tester', 'Edited', 'All Breeds', 3, 'Mochi (T002)', 'Kennel No.', '1', '2']]), formulaCols: [], lastRow: 2, maxRows: 1000 };
+  if (version >= 3) {
+    // dropdowns like the ones in a real kennel sheet
+    tabs['All Breeds'].rules = {
+      5: { list: ['M', 'F'], strict: true },
+      8: { list: ['Y', 'N', 'Pending', 'Exempted'], strict: true },
+      10: { list: ['1', '2', '3', '4', '5', '6'], strict: true },
+      11: { list: ['Active', 'Deceased', 'Retired', 'Sold', 'Adopted'], strict: true },
+    };
+  }
   const res = { ok: true, title: 'Test Kennel Records', url: 'https://docs.google.com/spreadsheets/d/TEST_SHEET_ID_1234567890abcdef/edit', version, tabs, photos: {} };
   if (version >= 2) { res.settings = settings || { checks: { licence: true, healthcheck: true, sterilise: true }, dueSoonDays: 14, breeding: { minAgeMonths: 12, maxLittersPer12Months: 1 }, reminders: { enabled: false, hour: 8, extra: '' } }; res.reminders = { installed: false }; }
   return res;

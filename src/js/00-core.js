@@ -1,7 +1,8 @@
 /* ───────── constants ───────── */
 const MASTER = 'All Breeds';
 const CHANGE_TAB = 'App Change Log';
-const NEED_BRIDGE = 2;
+const NEED_BRIDGE = 2;   // the app needs at least this bridge version
+const BRIDGE_LATEST = 3; // the newest bridge: older ones still work, the app suggests updating
 const EPOCH = Date.UTC(1899, 11, 30);
 const NOW = new Date();
 const TODAY = new Date(Date.UTC(NOW.getFullYear(), NOW.getMonth(), NOW.getDate()));
@@ -60,7 +61,7 @@ const PRESET = {
   'Type': ['Breeding', 'Whelping', 'Puppy', 'Isolation', 'Retired'],
 };
 ['General', 'Skin/Eyes/Ears/Oral/Nasal', 'Limbs', 'Heart/Lungs', 'General Condition', 'Posture & Gait', 'Eyes', 'Ears', 'Oral Health', 'Heart', 'Lungs', 'Spine/Tail', 'Anus/Vulva/Penis', 'Mammary Glands'].forEach(h => { PRESET[h] = EXAM; });
-const STATUS_OPTS = ['Active', 'Retired', 'Sold', 'Deceased', 'Transferred'];
+const STATUS_OPTS = ['Active', 'Retired', 'Adopted', 'Sold', 'Deceased', 'Transferred'];
 const STAFF_COLS = /^(administered by|person met|submitted by)$/i;
 const VET_COLS = /^(vet clinic|clinic|clinic \/ stamp|attending vet|administering vet|performing vet|issuing vet|vet name)$/i;
 const KENNEL_COLS = /^(kennel no\.|kennel \(from\)|kennel \(to\))$/i;
@@ -214,7 +215,7 @@ function parseBridge(res) {
   const tabs = {};
   for (const name of Object.keys(res.tabs || {})) {
     const x = res.tabs[name];
-    const t = { name, rowCount: x.maxRows || 1000, headers: (x.headers || []).map(h => String(h == null ? '' : h).trim()), idx: new Map(), kinds: [], rows: [], lastRow: x.lastRow || 1, types: [], formulaCols: new Set(x.formulaCols || []) };
+    const t = { name, rowCount: x.maxRows || 1000, headers: (x.headers || []).map(h => String(h == null ? '' : h).trim()), idx: new Map(), kinds: [], rows: [], lastRow: x.lastRow || 1, types: [], formulaCols: new Set(x.formulaCols || []), rules: x.rules && typeof x.rules === 'object' ? x.rules : {} };
     t.headers.forEach((h, c) => { if (h && !t.idx.has(h)) t.idx.set(h, c); });
     t.kinds = t.headers.map(h => kindOf(h, name));
     for (const row of x.rows || []) {
@@ -278,6 +279,7 @@ const findDog = (chip, id) => (chip && BYCHIP.get(normChip(chip))) || (id && BYI
 const evsFor = (chip, tab, role) => !chip ? [] : (IDX.byChip.get(chip) || []).filter(x => (!tab || x.ev.L.tab === tab) && (role == null || x.role === role)).map(x => x.ev).filter((e, i, a) => a.indexOf(e) === i).sort((a, b) => (b.date || 0) - (a.date || 0));
 const isActive = d => /^active/i.test(d.status);
 const isRetired = d => /retired/i.test(d.status);
+const isAdopted = d => /^adopted/i.test(d.status);
 const isFemale = d => /^f/i.test(d.sex);
 const isMale = d => /^m/i.test(d.sex);
 const onBreedingPremise = d => /breeding/i.test(d.premise);
@@ -369,7 +371,10 @@ function dogIssues(d) {
     }
     if (evsFor(d.chip, 'Deaths').length) push('deceased', 'warn', 'Recorded in Deaths but status is Active');
   }
-  if (C.sterilise && isRetired(d) && !truthy(d.sterilised) && !evsFor(d.chip, 'Sterilisations').length) push('sterilise', 'crit', 'Retired and no sterilisation recorded');
+  if (C.sterilise && isRetired(d) && !truthy(d.sterilised) && !/exempt/i.test(d.sterilised) && !evsFor(d.chip, 'Sterilisations').length) {
+    if (/pending/i.test(d.sterilised)) push('sterilise', 'warn', 'Retired, sterilisation pending');
+    else push('sterilise', 'crit', 'Retired and no sterilisation recorded');
+  }
   if (!d.chip) {
     const days = ageDays(d.dob);
     if (days != null && days < 70) push('chip', 'warn', 'Not microchipped yet');
@@ -392,7 +397,7 @@ const nameHTML = d => d.name ? esc(d.name) : `<span class="unnamed">Unnamed</spa
 const sexWord = s => /^f/i.test(s) ? 'Female' : /^m/i.test(s) ? 'Male' : (s || '');
 function statusPill(s) {
   if (!s) return '<span class="pill">No status</span>';
-  const cls = /^active/i.test(s) ? 'acc' : /deceased|died/i.test(s) ? 'crit' : '';
+  const cls = /^active/i.test(s) ? 'acc' : /^adopted/i.test(s) ? 'ok' : /deceased|died/i.test(s) ? 'crit' : '';
   return `<span class="pill ${cls}">${esc(s)}</span>`;
 }
 function eventSummary(ev) {
@@ -428,9 +433,11 @@ function upcoming(days) {
 }
 /** Which copy of a repeated header this column is (0 for the first). */
 function occOf(headers, c) { let k = 0; for (let i = 0; i < c; i++) if (headers[i] === headers[c]) k++; return k; }
+/** A cell as the bridge should expect it. An unticked tick box is sent as blank, which every bridge version accepts. */
+const expectVal = v => (v === 'FALSE' ? '' : v || '');
 /** Every column of a row as it was read, so the bridge can refuse the save if anything in that row changed since. */
 function rowExpect(t, row) {
-  return t.headers.map((h, c) => ({ h, c })).filter(x => x.h && !t.formulaCols.has(x.c)).map(({ h, c }) => ({ h, k: occOf(t.headers, c), v: row.v[c] || '', kind: t.kinds[c] }));
+  return t.headers.map((h, c) => ({ h, c })).filter(x => x.h && !t.formulaCols.has(x.c)).map(({ h, c }) => ({ h, k: occOf(t.headers, c), v: expectVal(row.v[c]), kind: t.kinds[c] }));
 }
 function newOpId() { try { return crypto.randomUUID(); } catch (e) { return Date.now().toString(36) + Math.random().toString(36).slice(2); } }
 function hashOf(x) { const s = JSON.stringify(x); let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16); }

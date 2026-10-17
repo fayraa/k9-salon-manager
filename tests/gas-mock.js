@@ -49,9 +49,9 @@ class Blob_ {
 /** Mimics how Sheets parses a value typed or written with setValue(s). */
 function enter(cell, v, where) {
   if (v === null || v === undefined) return;
-  if (cell.rule && !cell.rule.allowInvalid && v !== '') {
+  if (cell.rule && !cell.rule.allowInvalid && v !== '') { // list items match ignoring spaces around them (assumed, as for typed lists)
     const t = cell.rule.type, text = String(v).replace(/^'/, '');
-    const bad = (t === 'VALUE_IN_LIST' && !cell.rule.values.includes(text)) || (t === 'NUMBER_GREATER_THAN' && !(Number(v) > cell.rule.values[0])) || (t === 'CHECKBOX' && typeof v !== 'boolean');
+    const bad = (t === 'VALUE_IN_LIST' && !cell.rule.values.map(x => String(x).trim()).includes(text.trim())) || (t === 'NUMBER_GREATER_THAN' && !(Number(v) > cell.rule.values[0])) || (t === 'CHECKBOX' && typeof v !== 'boolean');
     if (bad) throw new Error(`The data you entered in cell ${where || ''} violates the data validation rules set on this cell.`);
   }
   delete cell.f;
