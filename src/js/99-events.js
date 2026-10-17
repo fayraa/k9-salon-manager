@@ -16,6 +16,8 @@ document.addEventListener('click', e => {
     case 'add-dog': openForm({ tab: MASTER, mode: 'new' }); break;
     case 'edit-dog': editRow(MASTER, +a.dataset.r); break;
     case 'bulk': openBulk(a.dataset.tab); break;
+    case 'quick-fill': openQuickFill({ preset: a.dataset.preset, issue: a.dataset.issue }); break;
+    case 'bridge-later': S.bridgeLater = true; renderBanners(); break;
     case 'litter': openLitter(a.dataset.chip || ''); break;
     case 'move-dog': openMoveDog(a.dataset.kennel); break;
     case 'filter-issue': S.dogs = Object.assign({}, S.dogs, { issue: a.dataset.issue, status: 'all', q: '', breed: '', sex: '' }); S.dogsMode = 'list'; go('dogs'); break;

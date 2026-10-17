@@ -39,7 +39,7 @@ test('rejects a wrong key and unknown actions', () => {
   assert.equal(b.post({ action: 'dance' }).error, 'bad_action');
   const ping = b.post({ action: 'ping' });
   assert.equal(ping.ok, true);
-  assert.equal(ping.version, 2);
+  assert.equal(ping.version, 3);
 });
 
 test('read returns rows, formula columns, default settings and no photos', () => {
@@ -406,4 +406,72 @@ test('a photo is only returned if it is an image inside the photo folder', () =>
   tab.getRange(3, 1, 1, 2).setValues([['999000000000102', 'secret-doc']]);
   const res = b.post({ action: 'photo_get', id: 'secret-doc' });
   assert.equal(res.ok, false);
+});
+
+test('read sends each column’s dropdown and tick-box rules, and leaves out very long lists', () => {
+  const { ss, ab, mat, lit } = fixture();
+  const STER = ['Y', 'N', 'Pending', 'Exempted'];
+  ab.cell(2, 9).rule = { type: 'VALUE_IN_LIST', values: STER };
+  ab.cell(2, 12).rule = { type: 'VALUE_IN_LIST', values: ['Active', 'Retired', 'Adopted', 'Sold', 'Deceased', ' Active '] };
+  ab.cell(2, 11).rule = { type: 'VALUE_IN_LIST', values: ['1', '2', '3'], allowInvalid: true };
+  ab.cell(2, 17).rule = { type: 'VALUE_IN_LIST', values: Array.from({ length: 150 }, (_, i) => '999000000000' + (100 + i)) };
+  ab.cell(4, 16).rule = { type: 'VALUE_IN_LIST', values: ['LOCAL', 'OTHER'] }; // only on the last row
+  mat.cell(2, 8).rule = { type: 'CHECKBOX' };
+  lit.cell(2, 15).rule = { type: 'VALUE_IN_LIST', values: ['Kept', 'Sold'] }; // a tab with headers only
+  const b = loadBridge(ss);
+  const r = b.post({ action: 'read', tabs: ['All Breeds', 'Mating Records', 'Puppies Bred In-House'] });
+  assert.equal(r.version, 3);
+  const rules = r.tabs['All Breeds'].rules;
+  assert.deepEqual(rules[8], { list: STER, strict: true });
+  assert.deepEqual(rules[11].list, ['Active', 'Retired', 'Adopted', 'Sold', 'Deceased'], 'trimmed, without repeats');
+  assert.equal(rules[10].strict, false, 'a dropdown that allows other values is only a suggestion');
+  assert.equal(rules[16], undefined, 'lists of more than 100 choices are left out');
+  assert.deepEqual(rules[15].list, ['LOCAL', 'OTHER']);
+  assert.equal(rules[0], undefined);
+  assert.deepEqual(r.tabs['Mating Records'].rules[7], { checkbox: true, values: null });
+  assert.deepEqual(r.tabs['Puppies Bred In-House'].rules[14].list, ['Kept', 'Sold']);
+  assert.equal(r.tabs['Puppies Bred In-House'].rows.length, 0);
+});
+
+test('quick fill: edits on many dogs write only those boxes, check each dog first and log every change', () => {
+  const { ss, ab } = fixture();
+  for (let r = 2; r <= 4; r++) ab.cell(r, 9).rule = { type: 'VALUE_IN_LIST', values: ['Y', 'N', 'Pending', 'Exempted'] };
+  const b = loadBridge(ss);
+  const ident = (id, chip, name) => [{ h: 'Animal ID', k: 0, v: id, kind: 'text' }, { h: 'Microchip No.', k: 0, v: chip, kind: 'chip' }, { h: 'Name', k: 0, v: name, kind: 'text' }];
+  const blanks = ['PALS Licence No.', 'Licence Expiry', 'Sterilised'].map(h => ({ h, k: 0, v: '', kind: h === 'Licence Expiry' ? 'date' : 'text' }));
+  const op = (row, id, chip, name, lic) => ({ tab: 'All Breeds', mode: 'edit', row, dog: `${name} (${id})`, expect: [...ident(id, chip, name), ...blanks], changes: [
+    { h: 'PALS Licence No.', k: 0, v: lic, kind: 'text' }, { h: 'Licence Expiry', k: 0, v: '2027-03-31', kind: 'date' }, { h: 'Sterilised', k: 0, v: 'Y', kind: 'text' }] });
+  const res = b.post({ action: 'batch', who: 'Austin', opId: 'qf-1', ops: [op(2, 'A001', '999000000000101', 'Biscuit', 'LIC 0001'), op(3, 'A002', '999000000000102', 'Pepper', '012345'), op(4, 'A009', '999000000000103', 'Toffee', 'LIC 0003')] });
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.results.map(x => x.written), [3, 3, 3]);
+  assert.equal(ab.peek(2, 19).v, 'LIC 0001');
+  assert.equal(ab.peek(3, 19).v, '012345', 'a licence number with a leading zero keeps it');
+  assert.ok(ab.peek(4, 20).v instanceof Date);
+  assert.equal(iso(ab.peek(4, 20).v), '2027-03-31');
+  assert.equal(ab.peek(2, 9).v, 'Y');
+  assert.equal(ab.peek(2, 3).v, 'Biscuit', 'other boxes are untouched');
+  const log = ss.getSheetByName('App Change Log');
+  assert.equal(log.getLastRow(), 1 + 9, 'one log line per changed box');
+  assert.equal(log.peek(2, 6).v, 'Biscuit (A001)');
+
+  const stale = b.post({ action: 'batch', who: 'Austin', ops: [
+    { tab: 'All Breeds', mode: 'edit', row: 2, expect: ident('A001', '999000000000101', 'Biscuit'), changes: [{ h: 'Kennel No.', k: 0, v: '5', kind: 'text' }] },
+    { tab: 'All Breeds', mode: 'edit', row: 3, expect: ident('A777', '999000000000102', 'Pepper'), changes: [{ h: 'Kennel No.', k: 0, v: '5', kind: 'text' }] },
+  ] });
+  assert.equal(stale.ok, false);
+  assert.equal(stale.error, 'row_changed');
+  assert.equal(stale.index, 1);
+  assert.equal(ab.peek(2, 11).v, 1, 'nothing in the group is written when one dog has moved');
+});
+
+test('a row with an unticked tick box can still be edited', () => {
+  const { ss, ab } = fixture();
+  ab.cell(2, 9).rule = { type: 'CHECKBOX' };
+  ab.cell(2, 9).v = false;
+  const b = loadBridge(ss);
+  for (const seen of ['FALSE', '']) {
+    const res = b.post({ action: 'save', tab: 'All Breeds', mode: 'edit', row: 2, changes: [{ h: 'Remarks', k: 0, v: 'Checked ' + seen, kind: 'long' }], expect: [{ h: 'Sterilised', k: 0, v: seen, kind: 'yesno' }, { h: 'Name', k: 0, v: 'Biscuit', kind: 'text' }] });
+    assert.equal(res.ok, true, `expecting “${seen}” for an unticked box`);
+  }
+  assert.equal(ab.peek(2, 13).v, 'Checked ');
 });

@@ -27,7 +27,7 @@ function renderTop() {
   const btn = (action, label, ico, extra = '', primary = true) => `<button class="btn ${primary ? 'primary' : ''}" data-action="${action}" ${extra}>${icon(ico)}<span class="lbl">${esc(label)}</span></button>`;
   let act = '';
   if (S.db) {
-    if (S.view === 'dogs') act = btn('add-dog', 'Add a dog', 'plus');
+    if (S.view === 'dogs') act = btn('quick-fill', 'Quick fill', 'sheet', '', false) + btn('add-dog', 'Add a dog', 'plus');
     else if (S.view === 'breeding') act = btn('new-entry', 'Record a mating', 'plus', 'data-tab="Mating Records"', false) + btn('litter', 'Record a litter', 'litter');
     else if (S.view === 'records') act = btn('bulk', 'Log for many dogs', 'many');
     else if (S.view === 'log' && L && !L.readOnly && S.db[S.tab]) act = (L.bulk ? btn('bulk', 'Log for many dogs', 'many', `data-tab="${esc(S.tab)}"`, false) : '') + btn('new-entry', `New ${L.noun}`, 'plus', `data-tab="${esc(S.tab)}"`);
@@ -39,6 +39,7 @@ function renderBanners() {
   const u = S.update;
   if (u.state === 'ready' && !S.updateDismissed) out.push(`<div class="banner acc" role="status">${icon('sync')}<span><b>Version ${esc(u.version)} is ready.</b> Restart the app to finish updating.</span><button class="btn sm primary" data-action="update-install">Restart now</button><button class="btn sm ghost" data-action="update-later">Later</button></div>`);
   if (S.db && S.bridgeVersion < NEED_BRIDGE) out.push(`<div class="banner warn" role="status">${icon('info')}<span><b>Update your bridge script</b> to turn on bulk logging, litters, photos, reminders, change history and shared settings. It takes about 3 minutes.</span><button class="btn sm" data-action="bridge-help">Show me how</button></div>`);
+  else if (S.db && S.bridgeVersion < BRIDGE_LATEST && !S.bridgeLater) out.push(`<div class="banner soft" role="status">${icon('info')}<span><b>A bridge update is ready.</b> It lets the app use your sheet’s dropdown lists, such as Status, Sterilised and Kennel No. About 3 minutes.</span><button class="btn sm" data-action="bridge-help">Show me how</button><button class="btn sm ghost" data-action="bridge-later">Later</button></div>`);
   $('#banners').innerHTML = out.join('');
 }
 function renderAll() {
@@ -160,6 +161,7 @@ function paletteItems(q) {
       .forEach(d => items.push({ g: 'Dogs', t: dogName(d), s: `${d.id} · ${titleCase(d.breed)}${d.chip ? ' · ' + d.chip : ''}`, run: () => openDog(d.chip, d.id) }));
     const acts = [
       ['Log for many dogs', 'bulk vaccinate deworm many group', () => openBulk()],
+      ['Quick fill dog details', 'quick fill licence licences kennel kennels sterilised status table many dogs', () => openQuickFill()],
       ['Record a litter', 'litter puppies whelp birth', () => openLitter()],
       ['Add a dog', 'add new dog', () => openForm({ tab: MASTER, mode: 'new' })],
       ['Monthly AVS report', 'avs monthly report submission', () => { S.reportTab = 'monthly'; go('reports'); }],

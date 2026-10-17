@@ -37,7 +37,7 @@ async function sendWrite(payload, opId) {
   if (!res || !res.ok) {
     const code = (res && res.error) || 'network';
     const msg = AMBIGUOUS.includes(code) ? UNCONFIRMED : deskText(res || {});
-    throw userErr(msg, { code, refresh: AMBIGUOUS.includes(code) || ['row_changed', 'row_moved', 'changed_after_save', 'refused'].includes(code), keepOp: AMBIGUOUS.includes(code) });
+    throw userErr(msg, { code, index: res && typeof res.index === 'number' ? res.index : null, refresh: AMBIGUOUS.includes(code) || ['row_changed', 'row_moved', 'changed_after_save', 'refused'].includes(code), keepOp: AMBIGUOUS.includes(code) });
   }
   return res;
 }
@@ -121,7 +121,7 @@ async function saveRow(job, changes) {
       else if (SEQ_COL.test(h)) out.push({ h, k: 0, v: String(t.rows.reduce((m, r) => Math.max(m, +r.v[c] || 0), 0) + 1), kind: 'number' });
     });
   }
-  const expect = job.mode === 'edit' ? job.cols.filter(c => !computed.has(c)).map(c => ({ h: job.headers[c], k: occOf(job.headers, c), v: job.orig[c] || '', kind: t.kinds[c] })) : [];
+  const expect = job.mode === 'edit' ? job.cols.filter(c => !computed.has(c)).map(c => ({ h: job.headers[c], k: occOf(job.headers, c), v: expectVal(job.orig[c]), kind: t.kinds[c] })) : [];
   if (!job.opId) job.opId = newOpId();
   S.saving = true;
   const prev = S.conn.state; S.conn.state = 'saving'; renderSync();
@@ -170,13 +170,13 @@ function setupView() {
 function openBridgeHelp() {
   modal('bridge', {
     title: 'Update the bridge script', narrow: false,
-    sub: `Your bridge is version ${S.bridgeVersion || 1}. Version ${NEED_BRIDGE} adds bulk logging, litters, dog photos, reminder emails, change history and shared settings.`,
+    sub: `Your bridge is version ${S.bridgeVersion || 1}. ${S.bridgeVersion < NEED_BRIDGE ? 'The update adds bulk logging, litters, dog photos, reminder emails, change history and shared settings, and lets the app use your sheet’s dropdown lists.' : `Version ${BRIDGE_LATEST} lets the app use your sheet’s dropdown lists, so choices like Status, Sterilised and Kennel No. match the sheet.`}`,
     body: `<ol class="steps compact">
       <li><div><b>Copy the new script</b><p>Your sheet’s ID is filled in for you.</p><div class="row"><button class="btn primary sm" data-action="copy-script">${icon('copy')}Copy bridge script</button></div></div></li>
       <li><div><b>Replace the old code</b><p>Open your <b>K-9 Salon App Bridge</b> project at script.google.com, select all the code (Ctrl+A), paste (Ctrl+V) and save (Ctrl+S).</p><div class="row"><a class="btn sm" href="https://script.google.com/home" target="_blank" rel="noopener">${icon('ext')}Open Apps Script</a></div></div></li>
-      <li><div><b>Approve the new permissions</b><p>Choose <code>setupAppBridge</code> and click <b>Run</b>. Google asks for access to Drive (dog photos), Gmail (reminder emails) and triggers (the daily schedule). Your access key stays the same.</p></div></li>
+      <li><div><b>Approve any new permissions</b><p>Choose <code>setupAppBridge</code> and click <b>Run</b>. If Google asks for access (Drive for dog photos, Gmail for reminder emails, triggers for the daily schedule), approve it. Your access key stays the same.</p></div></li>
       <li><div><b>Publish the new version</b><p>Click <b>Deploy → Manage deployments</b>, click the pencil icon, set <b>Version</b> to <b>New version</b> and click <b>Deploy</b>. The web app URL doesn’t change.</p></div></li>
-      <li><div><b>Reload</b><p>Come back here and press <b>Reload</b>. The yellow notice disappears when it worked.</p><div class="row"><button class="btn sm" data-action="reload-close">${icon('sync')}Reload</button></div></div></li>
+      <li><div><b>Reload</b><p>Come back here and press <b>Reload</b>. The notice about the bridge disappears when it worked.</p><div class="row"><button class="btn sm" data-action="reload-close">${icon('sync')}Reload</button></div></div></li>
     </ol>`,
     foot: `<span class="msg"></span><button class="btn" data-action="close-top">Close</button>`,
   });
@@ -193,7 +193,7 @@ async function submitConnForm(f) {
   const saved = await window.k9.setPrefs({ url, key }).catch(() => ({ ok: false }));
   if (!saved || !saved.ok) return say(deskText(saved || {}), true);
   S.prefs.url = url; S.prefs.key = key;
-  toast(`Connected to “${res.title || 'your sheet'}”${res.version < NEED_BRIDGE ? '. Your bridge script has an update available.' : ''}`);
+  toast(`Connected to “${res.title || 'your sheet'}”${res.version < BRIDGE_LATEST ? '. Your bridge script has an update available.' : ''}`);
   if (topOverlay('conn')) closeTop(true);
   S.db = null;
   if (S.view === 'settings') S.view = 'home';

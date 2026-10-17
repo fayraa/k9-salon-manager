@@ -30,8 +30,10 @@ function stub(opts) {
       call: async p => {
         S.calls.push(clone(p));
         await new Promise(r => setTimeout(r, 15));
-        if (p.action === 'read') return clone(O.read);
-        if (S.failNext && (p.action === 'save' || p.action === 'batch')) { const e = S.failNext; S.failNext = null; return { ok: false, error: e }; }
+        if (p.action === 'read') return clone(S.read || O.read);
+        if (p.action === 'batch') S.batchN = (S.batchN || 0) + 1;
+        if (S.failAt && p.action === 'batch' && S.batchN === S.failAt.n) return Object.assign({ ok: false }, S.failAt.res);
+        if (S.failNext && (p.action === 'save' || p.action === 'batch')) { const e = S.failNext; S.failNext = null; return typeof e === 'string' ? { ok: false, error: e } : Object.assign({ ok: false }, e); }
         if (p.action === 'save') return { ok: true, row: p.mode === 'new' ? 99 : p.row, id: p.tab === 'All Breeds' && p.mode === 'new' ? 'T099' : null };
         if (p.action === 'batch') { let n = 200, id = 22; return { ok: true, results: p.ops.map(op => ({ row: op.mode === 'new' ? n++ : op.row, id: op.tab === 'All Breeds' && op.mode === 'new' ? 'T0' + (id++) : null })) }; }
         if (p.action === 'settings_set') return { ok: true, settings: Object.assign({}, O.read.settings, p.settings), reminders: { installed: !!(p.settings.reminders && p.settings.reminders.enabled) } };
@@ -60,7 +62,7 @@ async function openApp(opts = {}) {
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-  await page.addInitScript(stub({ read: readResponse({ version: opts.version || 2, settings: opts.settings }), prefs: Object.assign({ url: 'https://script.google.com/macros/s/TEST/exec', key: 'good-key', who: 'Sam Tester', notify: true }, opts.prefs || {}) }));
+  await page.addInitScript(stub({ read: opts.read || readResponse({ version: opts.version || 2, settings: opts.settings }), prefs: Object.assign({ url: 'https://script.google.com/macros/s/TEST/exec', key: 'good-key', who: 'Sam Tester', notify: true }, opts.prefs || {}) }));
   await page.route('http://app.test/**', async route => {
     const f = path.join(R, new URL(route.request().url()).pathname.slice(1) || 'index.html');
     if (!fs.existsSync(f)) return route.fulfill({ status: 404 });
@@ -401,6 +403,188 @@ test('a save Google didn’t confirm can be pressed again without saving twice',
   const [first, second] = (await calls()).filter(c => c.action === 'batch');
   assert.equal(first.opId, second.opId);
   assert.equal(first.opHash, second.opHash);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+/** The test kennel plus extra active dogs that have no kennel yet. */
+function bigHerd(extra) {
+  const res = readResponse({ version: 3 });
+  const t = res.tabs['All Breeds'];
+  for (let i = 0; i < extra; i++) {
+    const r = t.lastRow + 1;
+    t.rows.push({ r, v: [`X${String(i + 1).padStart(3, '0')}`, '999000000' + String(500000 + i), `Extra ${i + 1}`, 'MALTESE', 'WHITE', 'F', ago(800), '2y', '', 'Test Kennel - Breeding', '', 'Active', '', '', '', 'Local breeder', '', '', '', ''] });
+    t.lastRow = r;
+  }
+  return res;
+}
+
+test('quick fill: licence numbers typed down the list save as one checked batch', async () => {
+  const { page, errors, ctx, calls } = await openApp({ version: 3 });
+  await page.click('.attn button[data-issue="licence"]');
+  await page.waitForSelector('#dog-table table');
+  await page.click('[data-action="quick-fill"][data-issue="licence"]');
+  await page.waitForSelector('.qf-table');
+  assert.equal(await page.inputValue('#qf-what'), 'licence');
+  assert.equal(await page.inputValue('#qf-which'), 'todo');
+  assert.equal(await page.locator('.qf-table tbody tr').count(), 10, 'the active dogs with no licence number');
+  await page.waitForFunction(() => document.activeElement && document.activeElement.id === 'qf-0-0');
+  await page.keyboard.type('LIC-2000');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'qf-1-0', 'Enter goes to the next dog');
+  await page.keyboard.type('LIC-1001'); // already Mochi's
+  await page.fill('#qf-0-1', '2027-05-01');
+  assert.match(await page.textContent('#qf-count'), /2 dogs changed/);
+  await page.click('#qf-save');
+  assert.match(await page.textContent('#qf-msg'), /LIC-1001 is on .*Mochi.*Each dog needs its own/);
+  assert.equal(await page.getAttribute('#qf-1-0', 'aria-invalid'), 'true');
+  assert.equal((await calls()).filter(c => c.action === 'batch').length, 0, 'nothing is sent while a number is repeated');
+  await page.fill('#qf-1-0', 'LIC-2001');
+  await page.click('#qf-save');
+  await page.waitForFunction(() => window.__k9.calls.some(c => c.action === 'batch'));
+  const batch = (await calls()).find(c => c.action === 'batch');
+  assert.equal(batch.ops.length, 2);
+  const [a, b] = batch.ops;
+  assert.equal(a.tab, 'All Breeds');
+  assert.equal(a.mode, 'edit');
+  assert.match(a.dog, /Biscuit/);
+  assert.ok(a.row < b.row, 'in sheet order');
+  assert.deepEqual(a.changes.map(c => [c.h, c.v, c.kind]), [['PALS Licence No.', 'LIC-2000', 'text'], ['Licence Expiry', '2027-05-01', 'date']]);
+  assert.deepEqual(b.changes.map(c => c.h), ['PALS Licence No.']);
+  assert.deepEqual(a.expect.map(e => e.h).sort(), ['Animal ID', 'Licence Expiry', 'Microchip No.', 'Name', 'PALS Licence No.']);
+  assert.equal(a.expect.find(e => e.h === 'Animal ID').v, 'T001');
+  assert.equal(a.expect.find(e => e.h === 'PALS Licence No.').v, '');
+  await page.waitForSelector('.toast');
+  assert.match(await page.textContent('.toasts'), /Saved 2 dogs/);
+  await page.waitForFunction(() => !document.querySelector('.qf-table'));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('quick fill offers the sheet’s dropdown choices and fills only the blank boxes', async () => {
+  const { page, errors, ctx, calls } = await openApp({ version: 3 });
+  assert.equal(await page.locator('.banner.soft').count(), 0, 'no bridge notice on the newest bridge');
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('#top-act [data-action="quick-fill"]');
+  await page.waitForSelector('.qf-table');
+  await page.selectOption('#qf-what', 'sterilised');
+  assert.equal(await page.locator('.qf-table tbody tr').count(), 1, 'one retired dog is flagged');
+  await page.selectOption('#qf-which', 'retired');
+  assert.equal(await page.locator('.qf-table tbody tr').count(), 2);
+  const opts = await page.$$eval('#qf-0-0 option', os => os.map(o => o.value));
+  assert.deepEqual(opts, ['', 'Yes', 'Y', 'N', 'Pending', 'Exempted'], 'the sheet’s choices, plus the value already there');
+  await page.selectOption('#qf-fill-8', 'Y');
+  await page.click('[data-qf-fill="8"]');
+  assert.match(await page.textContent('#qf-msg'), /Filled 1 blank box/);
+  assert.equal(await page.inputValue('#qf-0-0'), 'Yes', 'a box that already had a value is left alone');
+  assert.equal(await page.inputValue('#qf-1-0'), 'Y');
+  await page.click('#qf-save');
+  await page.waitForFunction(() => window.__k9.calls.some(c => c.action === 'batch'));
+  const batch = (await calls()).find(c => c.action === 'batch');
+  assert.equal(batch.ops.length, 1);
+  assert.match(batch.ops[0].dog, /Juniper/);
+  assert.deepEqual(batch.ops[0].changes, [{ h: 'Sterilised', k: 0, v: 'Y', kind: 'text' }]);
+  await page.waitForSelector('.toast');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('quick fill saves a long list in groups, and a group Google didn’t confirm can be sent again safely', async () => {
+  const { page, errors, ctx, calls } = await openApp({ read: bigHerd(70) });
+  await page.evaluate(() => { window.__k9.failAt = { n: 2, res: { error: 'timeout' } }; });
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('[data-action="dogs-mode"][data-mode="kennels"]');
+  await page.click('[data-action="quick-fill"][data-preset="kennel"]');
+  await page.waitForSelector('.qf-table');
+  assert.equal(await page.inputValue('#qf-which'), 'blank-active');
+  assert.equal(await page.locator('.qf-table tbody tr').count(), 71, 'the new dogs and the unnamed puppy have no kennel');
+  await page.selectOption('#qf-fill-10', '3');
+  await page.click('[data-qf-fill="10"]');
+  await page.click('#qf-save');
+  await page.waitForFunction(() => /won’t be saved twice/.test(document.querySelector('#qf-msg').textContent));
+  assert.match(await page.textContent('#qf-msg'), /Saved 40 of 71 dogs/);
+  assert.equal(await page.textContent('#qf-save'), 'Save again');
+  assert.match(await page.textContent('#qf-count'), /31 dogs changed/);
+  await page.click('#qf-save');
+  await page.waitForSelector('.toast');
+  assert.match(await page.textContent('.toasts'), /Saved 71 dogs/);
+  const batches = (await calls()).filter(c => c.action === 'batch');
+  assert.deepEqual(batches.map(b => b.ops.length), [40, 31, 31]);
+  assert.equal(batches[1].opId, batches[2].opId, 'the unconfirmed group is resent with the same ID');
+  assert.equal(batches[1].opHash, batches[2].opHash);
+  assert.notEqual(batches[0].opId, batches[1].opId);
+  assert.ok(!batches[2].ops.some(op => batches[0].ops.some(x => x.row === op.row)), 'the first group isn’t sent again');
+  assert.ok(batches.every(b => b.ops.every(op => op.changes.length === 1 && op.changes[0].v === '3')));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('quick fill: when a dog changed in the sheet meanwhile, it reloads and keeps the rest of what you typed', async () => {
+  const { page, errors, ctx, calls } = await openApp({ version: 3 });
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('#top-act [data-action="quick-fill"]');
+  await page.waitForSelector('.qf-table');
+  await page.fill('#qf-0-0', 'LIC-3000'); // Biscuit
+  await page.fill('#qf-1-0', 'LIC-3001'); // Pepper
+  const changed = readResponse({ version: 3 });
+  changed.tabs['All Breeds'].rows[0].v[18] = 'LIC-OTHER'; // someone filled in Biscuit’s licence meanwhile
+  await page.evaluate(r => { window.__k9.read = r; window.__k9.failNext = { error: 'row_changed', index: 0 }; }, changed);
+  await page.click('#qf-save');
+  await page.waitForFunction(() => /press Save again/.test(document.querySelector('#qf-msg').textContent));
+  const msg = await page.textContent('#qf-msg');
+  assert.match(msg, /Biscuit \(T001\) was changed in the sheet/);
+  assert.match(msg, /1 box someone else had already changed now shows the sheet’s value/);
+  assert.equal(await page.inputValue('#qf-0-0'), 'LIC-3001', 'what you typed for other dogs is kept');
+  assert.match(await page.textContent('#qf-count'), /1 dog changed/);
+  await page.click('#qf-save');
+  await page.waitForFunction(() => window.__k9.calls.filter(c => c.action === 'batch').length === 2);
+  const second = (await calls()).filter(c => c.action === 'batch')[1];
+  assert.equal(second.ops.length, 1);
+  assert.match(second.ops[0].dog, /Pepper/);
+  await page.waitForSelector('.toast');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('Adopted is a status with its own filter, and forms use the sheet’s dropdown lists', async () => {
+  const read = readResponse({ version: 3 });
+  const rows = read.tabs['All Breeds'].rows;
+  rows.find(r => r.v[2] === 'Olive').v[11] = 'Adopted';
+  rows.find(r => r.v[2] === 'Juniper').v[8] = 'Exempted';
+  const { page, errors, ctx } = await openApp({ read });
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('[data-action="dogs-status"][data-status="adopted"]');
+  assert.equal(await page.locator('#dog-table tbody tr').count(), 1);
+  assert.match(await page.textContent('#dog-table tbody tr'), /Olive/);
+  assert.equal(await page.locator('#dog-table .pill.ok', { hasText: 'Adopted' }).count(), 1);
+  await page.click('[data-action="dogs-status"][data-status="retired"]');
+  const jun = page.locator('#dog-table tbody tr', { hasText: 'Juniper' });
+  assert.doesNotMatch(await jun.textContent(), /Sterilise/, 'a dog exempted from sterilisation isn’t flagged');
+  await jun.click();
+  await page.click('.drawer [data-action="edit-dog"]');
+  await page.waitForSelector('form.mcard');
+  const status = await page.$$eval('form.mcard select[data-kind="status"] option', os => os.map(o => o.value));
+  assert.deepEqual(status, ['', 'Retired', 'Active', 'Deceased', 'Sold', 'Adopted']);
+  const steril = await page.$$eval('form.mcard .field', fs => { const f = fs.find(x => /^Sterilised/.test(x.textContent)); return Array.from(f.querySelectorAll('option')).map(o => o.value); });
+  assert.deepEqual(steril, ['', 'Exempted', 'Y', 'N', 'Pending']);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('an older bridge still works and suggests the update without getting in the way', async () => {
+  const { page, errors, ctx } = await openApp();
+  await page.waitForSelector('.banner.soft');
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('#top-act [data-action="quick-fill"]');
+  await page.waitForSelector('.qf-table');
+  assert.match(await page.textContent('.mcard .note'), /dropdown lists/);
+  await page.selectOption('#qf-what', 'status');
+  const opts = await page.$$eval('#qf-0-0 option', os => os.map(o => o.value));
+  assert.ok(opts.includes('Adopted'), 'the app’s own list includes Adopted');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('.ov'));
+  await page.click('[data-action="bridge-later"]');
+  assert.equal(await page.locator('.banner.soft').count(), 0);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

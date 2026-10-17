@@ -73,6 +73,7 @@ function dogList() {
     if (f.status === 'puppies' && !(isActive(d) && m != null && m < 12)) return false;
     if (f.status === 'breeding' && !(isActive(d) && onBreedingPremise(d))) return false;
     if (f.status === 'retired' && !isRetired(d)) return false;
+    if (f.status === 'adopted' && !isAdopted(d)) return false;
     if (f.breed && d.breed !== f.breed) return false;
     if (f.sex && !String(d.sex).toUpperCase().startsWith(f.sex)) return false;
     if (f.issue && !d.issues.some(i => i.k === f.issue)) return false;
@@ -89,7 +90,7 @@ function dogList() {
 function viewDogs() {
   const f = S.dogs;
   const breeds = Array.from(new Set(DOGS.map(d => d.breed).filter(Boolean))).sort();
-  const segs = [['active', 'Active'], ['breeding', 'Breeding'], ['puppies', 'Puppies'], ['retired', 'Retired'], ['all', 'All']];
+  const segs = [['active', 'Active'], ['breeding', 'Breeding'], ['puppies', 'Puppies'], ['retired', 'Retired'], ['adopted', 'Adopted'], ['all', 'All']];
   const mode = `<div class="seg" role="group" aria-label="Show as">${[['list', 'List', 'list'], ['kennels', 'Kennels', 'grid']].map(([k, l, i]) => `<button data-action="dogs-mode" data-mode="${k}" aria-pressed="${S.dogsMode === k}">${icon(i)}${l}</button>`).join('')}</div>`;
   if (S.dogsMode === 'kennels') return `<div class="toolbar">${mode}</div>${kennelsHTML()}`;
   return `
@@ -100,6 +101,7 @@ function viewDogs() {
     <label class="sr" for="dog-breed">Breed</label><select class="sel" id="dog-breed"><option value="">All breeds</option>${breeds.map(b => `<option ${b === f.breed ? 'selected' : ''} value="${esc(b)}">${esc(titleCase(b))}</option>`).join('')}</select>
     <label class="sr" for="dog-sex">Sex</label><select class="sel" id="dog-sex"><option value="">Both sexes</option><option value="F" ${f.sex === 'F' ? 'selected' : ''}>Female</option><option value="M" ${f.sex === 'M' ? 'selected' : ''}>Male</option></select>
     ${f.issue ? `<button class="filter-chip" data-action="clear-issue" aria-label="Remove filter: ${esc(ISSUE[f.issue].label)}">${esc(ISSUE[f.issue].label)}${icon('x')}</button>` : ''}
+    ${f.issue && QF_PRESETS.some(p => p.issue === f.issue) ? `<button class="btn sm" data-action="quick-fill" data-issue="${esc(f.issue)}">${icon('sheet')}Fill these in</button>` : ''}
     <span class="count" id="dog-count" aria-live="polite"></span>
   </div>
   <div id="dog-table"></div>`;
@@ -159,7 +161,7 @@ function kennelsHTML() {
     </section>`;
   };
   if (!ks.length) return `<div class="empty"><h2>No kennels yet</h2><p>Add kennels in the Kennels tab (Records → Farm → Kennels) and give each dog a kennel number.</p><div class="row"><button class="btn primary" data-action="new-entry" data-tab="Kennels">${icon('plus')}Add a kennel</button></div></div>`;
-  return `${none.length ? `<div class="note">${icon('info')}<span>${plural(none.length, 'active dog has', 'active dogs have')} no kennel number. Open a dog and choose <b>Edit details</b>, or use <b>Move a dog here</b> on a kennel.</span></div>` : ''}
+  return `${none.length ? `<div class="note">${icon('info')}<span>${plural(none.length, 'active dog has', 'active dogs have')} no kennel number. Fill them all in at once, or use <b>Move a dog here</b> on a kennel.</span><button class="btn sm" data-action="quick-fill" data-preset="kennel">${icon('sheet')}Fill in kennels</button></div>` : ''}
     ${Object.keys(blocks).map(b => `<section class="grid" style="gap:12px"><h2 class="sec-title">${esc(b)}</h2><div class="kennels">${blocks[b].map(card).join('')}</div></section>`).join('')}`;
 }
 function openMoveDog(kennel) {

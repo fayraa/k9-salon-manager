@@ -79,7 +79,7 @@ function viewSettings() {
   <section class="set" id="set-connection"><h2>Connection</h2>
     <dl class="kv"><dt>Status</dt><dd>${esc(S.conn.state === 'live' ? `Connected · synced at ${clock(S.conn.at)}` : S.conn.state === 'setup' ? 'Not connected yet' : S.conn.msg || 'Connecting…')}</dd>
     <dt>Spreadsheet</dt><dd>${S.sheetUrl ? `<a href="${esc(S.sheetUrl)}" target="_blank" rel="noopener">${esc(S.sheetTitle || 'Open in Google Sheets')}</a>` : '—'}</dd>
-    <dt>Bridge script</dt><dd>${S.bridgeVersion ? `Version ${S.bridgeVersion}${S.bridgeVersion < NEED_BRIDGE ? ' · <b>update available</b>' : ' · up to date'}` : '—'}</dd>
+    <dt>Bridge script</dt><dd>${S.bridgeVersion ? `Version ${S.bridgeVersion}${S.bridgeVersion < NEED_BRIDGE ? ' · <b>update needed</b>' : S.bridgeVersion < BRIDGE_LATEST ? ' · <b>update available</b>' : ' · up to date'}` : '—'}</dd>
     <dt>Refresh</dt><dd>Every 2 minutes, after each save, and with Ctrl+R</dd></dl>
     ${connFields(P, 'conn-form')}
     <div class="row"><button class="btn" data-action="reload">${icon('sync')}Reload now</button><button class="btn" data-action="copy-script">${icon('copy')}Copy bridge script</button><button class="btn" data-action="bridge-help">How to update the bridge</button></div>

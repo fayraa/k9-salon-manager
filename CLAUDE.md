@@ -21,8 +21,9 @@ Google Sheet through a Google Apps Script web app ("the bridge", `apps-script/K9
   Test data lives in `tests/fixture.js` and uses `999…` test microchips. The repo is public.
 - `apps-script/K9AppBridge.gs` must keep `const SPREADSHEET_ID = '__SHEET_ID__';` (checked by `npm run check`).
 - The bridge writes to real records. Any change to save logic needs a test in `tests/bridge.test.js`.
-  New bridge actions must stay backward compatible; bump `BRIDGE_VERSION` in the bridge and `NEED_BRIDGE`
-  in `src/js/00-core.js` only when the app requires the new actions, because users must redeploy the script.
+  New bridge actions must stay backward compatible, because users must redeploy the script to get them.
+  When the bridge gains something useful, bump `BRIDGE_VERSION` in the bridge and `BRIDGE_LATEST` in
+  `src/js/00-core.js` (the app then suggests the update). Bump `NEED_BRIDGE` only when the app can't work without it.
 - Keep UI text plain and short. Keep keyboard access, focus handling and the high-contrast mode working.
 
 ## Releases (maintainer only)
