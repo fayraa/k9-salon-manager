@@ -1,9 +1,9 @@
 /* ───────── log for many dogs ───────── */
 const BULK_MAX = 300;
 function bulkTabs() { return LOGS.filter(L => L.bulk && S.db[L.tab] && S.db[L.tab].kinds.includes('chip')); }
-function needBridge(what) {
-  if (S.bridgeVersion >= NEED_BRIDGE) return false;
-  modal('need', { title: `${what} needs the bridge update`, narrow: true, body: `<p>Saving many rows at once uses the new version of your bridge script. Updating it takes about 3 minutes and your data stays where it is.</p>`, foot: `<span class="msg"></span><button class="btn" data-action="close-top">Not now</button><button class="btn primary" data-action="bridge-help">Show me how</button>` });
+function needBridge(what, min = NEED_BRIDGE) {
+  if (S.bridgeVersion >= min) return false;
+  modal('need', { title: `${what} needs the bridge update`, narrow: true, body: `<p>This uses a newer version of your bridge script. Updating it takes about 3 minutes and your data stays where it is.</p>`, foot: `<span class="msg"></span><button class="btn" data-action="close-top">Not now</button><button class="btn primary" data-action="bridge-help">Show me how</button>` });
   return true;
 }
 function openBulk(tab) {

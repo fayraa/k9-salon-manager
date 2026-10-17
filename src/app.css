@@ -370,6 +370,31 @@ td .before{text-decoration:line-through;color:var(--muted)}
 #bk-fields{max-height:min(52vh,540px);overflow:auto;padding:2px 6px 2px 2px}
 .mcard.wide .m-b{overflow:auto}
 
+/* documents */
+.docs{list-style:none;margin:0 0 10px;padding:0;display:grid;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.doc{display:flex;gap:10px;align-items:center;padding:8px 10px 8px 14px;border-top:1px solid var(--line);background:var(--surface)}
+.doc:first-child{border-top:0}
+.doc-ic{color:var(--accent);display:grid;flex:none}
+.doc-t{flex:1;min-width:0}
+.doc-t b{display:block;font-weight:800}
+.doc-t small{display:block;color:var(--muted);font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.papers{display:grid;gap:6px;margin-bottom:10px}
+.papers .linkbtn{font-size:inherit}
+.drop{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;padding:18px;border:2px dashed var(--line-2);border-radius:12px;background:var(--surface-2);color:var(--muted);text-align:center}
+.drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
+.drop:focus-within{border-color:var(--accent)}
+.drop:focus-within label.btn{outline:3px solid var(--focus);outline-offset:2px}
+.dc-pick{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:12px}
+.dc-pick>.ic{color:var(--accent);flex:none}
+.dc-pick span{flex:1;min-width:0}
+.dc-pick b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dc-pick small{display:block;color:var(--muted);font-size:14px}
+.field[hidden]{display:none}
+.clip{display:inline-grid;vertical-align:-3px;margin-left:6px;color:var(--accent)}
+.clip .ic{width:16px;height:16px}
+.btn.danger{background:var(--crit);border-color:var(--crit);color:var(--surface)}
+@media (forced-colors:active){.drop{border:2px dashed CanvasText}.drop:focus-within label.btn{outline:3px solid Highlight}.btn.danger{border:2px solid CanvasText}}
+
 /* quick fill */
 .note .btn{margin-left:auto;flex:none}
 .qf-fs{border:0;margin:0;padding:0;min-width:0;display:grid;gap:14px}

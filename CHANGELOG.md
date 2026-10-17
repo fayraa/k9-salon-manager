@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0
+
+**New**
+- **Documents for each dog**: add photos or PDFs of vaccination records, health and death certificates, vet reports, licences, pedigree and purchase papers. Open a dog and use **Add a document**. Files are kept in your Google Drive, in a **K-9 Salon Dog Documents** folder, and listed in a hidden **App Documents** tab.
+- **Several photos of one record** (for example each page of a vaccination booklet) are saved together as one PDF, a page each. Photos are shrunk to a readable size, and their location data is removed.
+- **Link a document to its record**: pick the vaccination, health check or death certificate it belongs to. The app fills in that record's link column in the sheet (such as Certificate PDF Link), if it's empty. Records with a document show a paperclip in the dog's history.
+- **Import papers** for imported dogs: the profile lists the import permit, export health certificate and overseas vaccination record, shows which are on file, and fills in the country from the Source column. Optional check in **Settings → Checks** to flag imported dogs whose papers aren't all on file.
+- **Open** a document in your usual PDF or picture viewer, or in Google Drive. **Remove** moves the file to your Drive bin, where it can be restored for 30 days.
+- The health record PDF lists the documents on file.
+
+**Needs the bridge update**: documents need version 4 of the bridge script. The app shows how to update it.
+
 ## 1.2.0
 
 **New**

@@ -13,7 +13,7 @@ const chip = i => '999000000' + String(100000 + i);
 const dogs = NAMES.map((name, i) => {
   const female = i % 3 !== 2;
   const years = 1 + (i % 7);
-  return [`T${String(i + 1).padStart(3, '0')}`, chip(i), name, BREEDS[i % 4], ['CREAM', 'WHITE', 'APRICOT'][i % 3], female ? 'F' : 'M', ago(years * 365 + i * 11), `${years}y`, i === 18 ? 'Yes' : '', i < 15 ? 'Test Kennel - Breeding' : 'Test Kennel', String(1 + (i % 4)), i === 18 || i === 19 ? 'Retired' : 'Active', '', '', '', 'Local breeder', '', '', i % 2 ? `LIC-${1000 + i}` : '', i % 2 ? ahead(200) : ''];
+  return [`T${String(i + 1).padStart(3, '0')}`, chip(i), name, BREEDS[i % 4], ['CREAM', 'WHITE', 'APRICOT'][i % 3], female ? 'F' : 'M', ago(years * 365 + i * 11), `${years}y`, i === 18 ? 'Yes' : '', i < 15 ? 'Test Kennel - Breeding' : 'Test Kennel', String(1 + (i % 4)), i === 18 || i === 19 ? 'Retired' : 'Active', '', '', '', i === 4 ? 'THAI IMPT' : 'Local breeder', '', '', i % 2 ? `LIC-${1000 + i}` : '', i % 2 ? ahead(200) : ''];
 });
 dogs.push(['T021', chip(20), '', 'MALTIPOO', 'CREAM', 'F', ago(40), '1 month', '', 'Test Kennel', '', 'Active', '', '', '', 'Bred in-house', chip(0), chip(2), '', '']);
 dogs.push(['T022', chip(21), 'Olive', 'MALTESE', 'WHITE', 'F', ago(900), '2y', '', 'Test Kennel', '2', '', 'A very long remark', '', '', 'Local breeder', '', '', '', '']);
@@ -46,7 +46,11 @@ function readResponse({ version = 2, settings } = {}) {
       11: { list: ['Active', 'Deceased', 'Retired', 'Sold', 'Adopted'], strict: true },
     };
   }
-  const res = { ok: true, title: 'Test Kennel Records', url: 'https://docs.google.com/spreadsheets/d/TEST_SHEET_ID_1234567890abcdef/edit', version, tabs, photos: {} };
+  const docs = version >= 4 ? [
+    { id: 'doc-test-0001', aid: 'T001', chip: chip(0), dog: 'Biscuit (T001)', type: 'Vaccination record', date: ago(360), country: '', note: 'Booster', name: 'T001 Biscuit (T001) - Vaccination record.pdf', mime: 'application/pdf', tab: 'Vaccinations', row: 2, added: '2026-10-01 09:00', by: 'Sam Tester' },
+    { id: 'doc-test-0002', aid: 'T005', chip: chip(4), dog: 'Luna (T005)', type: 'Import permit', date: ago(700), country: '', note: '', name: 'T005 Luna (T005) - Import permit.jpg', mime: 'image/jpeg', tab: '', row: null, added: '2026-10-01 09:05', by: 'Sam Tester' },
+  ] : undefined;
+  const res = { ok: true, title: 'Test Kennel Records', url: 'https://docs.google.com/spreadsheets/d/TEST_SHEET_ID_1234567890abcdef/edit', version, tabs, photos: {}, docs };
   if (version >= 2) { res.settings = settings || { checks: { licence: true, healthcheck: true, sterilise: true }, dueSoonDays: 14, breeding: { minAgeMonths: 12, maxLittersPer12Months: 1 }, reminders: { enabled: false, hour: 8, extra: '' } }; res.reminders = { installed: false }; }
   return res;
 }

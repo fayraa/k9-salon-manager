@@ -2,7 +2,8 @@
 const MASTER = 'All Breeds';
 const CHANGE_TAB = 'App Change Log';
 const NEED_BRIDGE = 2;   // the app needs at least this bridge version
-const BRIDGE_LATEST = 3; // the newest bridge: older ones still work, the app suggests updating
+const BRIDGE_LATEST = 4; // the newest bridge: older ones still work, the app suggests updating
+const DOC_BRIDGE = 4;    // documents need this bridge version
 const EPOCH = Date.UTC(1899, 11, 30);
 const NOW = new Date();
 const TODAY = new Date(Date.UTC(NOW.getFullYear(), NOW.getMonth(), NOW.getDate()));
@@ -90,9 +91,10 @@ const ISSUE = {
   sterilise: { label: 'Retired and not sterilised', short: 'Sterilise' },
   deceased: { label: 'In Deaths tab but still marked active', short: 'Status' },
   chip: { label: 'Microchip number to check', short: 'Chip' },
+  papers: { label: 'Import papers not on file', short: 'Papers' },
 };
 const DEFAULT_SHARED = {
-  checks: { licence: true, healthcheck: true, sterilise: true },
+  checks: { licence: true, healthcheck: true, sterilise: true, papers: false },
   dueSoonDays: 14,
   breeding: { minAgeMonths: 12, maxLittersPer12Months: null, maxLitters: null, maxCsections: null, retireAgeYears: null, minMonthsBetweenLitters: null },
   reminders: { enabled: false, hour: 8, extra: '' },
@@ -102,7 +104,7 @@ const DEFAULT_PREFS = { url: '', key: '', who: '', textSize: 1, contrast: 'norma
 /* ───────── state ───────── */
 const S = {
   db: null, sheetTitle: '', sheetUrl: '', bridgeVersion: 0,
-  shared: clone(DEFAULT_SHARED), photos: {}, reminders: { installed: false },
+  shared: clone(DEFAULT_SHARED), photos: {}, docs: [], reminders: { installed: false },
   prefs: clone(DEFAULT_PREFS), version: '',
   view: 'home', tab: null, reportTab: 'monthly', dogsMode: 'list',
   dogs: { status: 'active', breed: '', sex: '', q: '', issue: '', sort: 'id', dir: 1 },
@@ -184,6 +186,9 @@ const IC = {
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8v.2"/>',
   move: '<path d="M4 12h16M15 7l5 5-5 5"/>',
+  image: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 5-4.5 3.5 3 3-2.5 4.5 4"/>',
+  clip: '<path d="M16.5 7.5 9 15a2.1 2.1 0 0 1-3-3l8-8a3.5 3.5 0 0 1 5 5l-8.5 8.5a5 5 0 0 1-7-7L11 3"/>',
+  doc: '<path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/>',
 };
 const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${IC[n] || ''}</svg>`;
 
@@ -370,6 +375,11 @@ function dogIssues(d) {
       if (flags.length) push('breeding', 'warn', `Breeding limit reached: ${flags.map(f => f.text).join('; ')}`);
     }
     if (evsFor(d.chip, 'Deaths').length) push('deceased', 'warn', 'Recorded in Deaths but status is Active');
+    if (C.papers && !S.docsError && isImported(d)) {
+      const have = new Set(docsFor(d).map(x => x.type));
+      const miss = IMPORT_PAPERS.filter(t => !have.has(t));
+      if (miss.length) push('papers', 'warn', `Import papers not on file: ${miss.join(', ').toLowerCase()}`);
+    }
   }
   if (C.sterilise && isRetired(d) && !truthy(d.sterilised) && !/exempt/i.test(d.sterilised) && !evsFor(d.chip, 'Sterilisations').length) {
     if (/pending/i.test(d.sterilised)) push('sterilise', 'warn', 'Retired, sterilisation pending');

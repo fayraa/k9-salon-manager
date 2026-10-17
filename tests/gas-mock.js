@@ -34,6 +34,7 @@ const Utilities = {
     return new Date(Date.UTC(y, m - 1, d) - TZ_OFFSET[tz] * 36e5);
   },
   getUuid: () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, () => (Math.random() * 16 | 0).toString(16)),
+  sleep: () => {},
   base64Decode: s => Array.from(Buffer.from(s, 'base64')),
   base64Encode: bytes => Buffer.from(bytes).toString('base64'),
   newBlob: (bytes, mime, name) => new Blob_(bytes, mime, name),
@@ -141,7 +142,7 @@ class Spreadsheet_ {
   getUrl() { return 'https://docs.google.com/spreadsheets/d/TESTID/edit'; }
   getSpreadsheetTimeZone() { return this.tz; }
   getSheets() { return this.sheets; }
-  getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
+  getSheetByName(n) { return this.sheets.find(s => s.name.toLowerCase() === String(n).toLowerCase()) || null; } // Sheets ignores capitals here
   insertSheet(n) { const s = new Sheet_(n); this.sheets.push(s); return s; }
 }
 
@@ -151,12 +152,25 @@ function loadBridge(ss, extra = {}) {
   const mail = [];
   const files = new Map();
   const cache = new Map();
-  let folderId = null;
+  const folders = new Map(); // id → { name, trashed }
+  const fileObj = id => {
+    const f = files.get(id);
+    let i = 0;
+    return {
+      getId: () => id, getName: () => f.getName(), setDescription: d => { f.desc = d; }, getBlob: () => f,
+      isTrashed: () => !!f.trashed, setTrashed: t => { f.trashed = !!t; },
+      getParents: () => { const ps = [f.folder].filter(Boolean); return { hasNext: () => i < ps.length, next: () => ({ getId: () => ps[i++] }) }; },
+    };
+  };
+  const folderObj = id => ({
+    getId: () => id, isTrashed: () => folders.get(id).trashed, setTrashed: t => { folders.get(id).trashed = !!t; },
+    createFile: blob => { const fid = 'file' + (files.size + 1); blob.folder = id; files.set(fid, blob); return fileObj(fid); },
+  });
   const ctx = {
     console: { log() {}, warn() {} },
     Utilities, JSON, Math, Date, Number, String, Object, Array, RegExp, Error, isFinite, isNaN, parseInt, parseFloat,
     SpreadsheetApp: { openById: id => { if (id !== 'TESTID') throw new Error('wrong id ' + id); return ss; }, flush() {} },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: k => (props.has(k) ? props.get(k) : null), setProperty: (k, v) => { if (String(v).length > 9000) throw new Error('property too large'); props.set(k, String(v)); }, deleteProperty: k => props.delete(k) }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => (props.has(k) ? props.get(k) : null), setProperty: (k, v) => { if (String(v).length > 9000) throw new Error('property too large'); props.set(k, String(v)); }, setProperties: o => { Object.keys(o).forEach(k => props.set(k, String(o[k]))); }, deleteProperty: k => props.delete(k) }) },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
     CacheService: { getScriptCache: () => ({ get: k => (cache.has(k) ? cache.get(k) : null), put: (k, v) => { if (String(v).length > 100000) throw new Error('too big'); cache.set(k, String(v)); } }) },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ setMimeType() { return this; }, getContent: () => s }) },
@@ -168,9 +182,9 @@ function loadBridge(ss, extra = {}) {
       newTrigger: fn => { const b = { spec: { fn } }; const chain = { timeBased: () => chain, everyDays: n => (b.spec.days = n, chain), atHour: h => (b.spec.hour = h, chain), inTimezone: z => (b.spec.tz = z, chain), create: () => { const t = { getHandlerFunction: () => fn, spec: b.spec }; triggers.push(t); return t; } }; return chain; },
     },
     DriveApp: {
-      createFolder: name => { folderId = 'folder1'; return { getId: () => folderId, isTrashed: () => false, createFile: blob => { const id = 'file' + (files.size + 1); blob.folder = folderId; files.set(id, blob); return { getId: () => id, getName: () => blob.getName(), setDescription() {} }; } }; },
-      getFolderById: id => { if (id !== folderId) throw new Error('no folder'); return { getId: () => id, isTrashed: () => false, createFile: blob => { const fid = 'file' + (files.size + 1); blob.folder = folderId; files.set(fid, blob); return { getId: () => fid, getName: () => blob.getName(), setDescription() {} }; } }; },
-      getFileById: id => { if (!files.has(id)) throw new Error('no file'); const f = files.get(id); const parents = [f.folder].filter(Boolean); let i = 0; return { getBlob: () => f, getParents: () => ({ hasNext: () => i < parents.length, next: () => ({ getId: () => parents[i++] }) }) }; },
+      createFolder: name => { const id = 'folder' + (folders.size + 1); folders.set(id, { name, trashed: false }); return folderObj(id); },
+      getFolderById: id => { if (!folders.has(id)) throw new Error('no folder'); return folderObj(id); },
+      getFileById: id => { if (!files.has(id)) throw new Error('no file'); return fileObj(id); },
       _addFile: (id, blob, folder) => { blob.folder = folder; files.set(id, blob); },
     },
   };
@@ -178,7 +192,7 @@ function loadBridge(ss, extra = {}) {
   const src = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'K9AppBridge.gs'), 'utf8').replace("'__SHEET_ID__'", "'TESTID'");
   vm.runInContext(src + '\n;this.__consts = { CHANGE_TAB, PHOTO_TAB, BRIDGE_VERSION };', ctx);
   const post = body => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(Object.assign({ key: 'k'.repeat(40) }, body)) } }).getContent());
-  return { ctx, post, props, triggers, mail, files, cache };
+  return { ctx, post, props, triggers, mail, files, cache, folders };
 }
 
 module.exports = { Sheet_, Spreadsheet_, loadBridge, Utilities, DAY };

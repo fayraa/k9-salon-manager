@@ -35,6 +35,7 @@ function viewSettings() {
     ${toggle('x-licence', 'Dog licence numbers', X.checks.licence, 'Flag active dogs with no licence number, or one expiring within 30 days', !can)}
     ${toggle('x-health', 'Annual health checks', X.checks.healthcheck, 'Flag breeding dogs whose last annual check is over 12 months old', !can)}
     ${toggle('x-steril', 'Sterilisation of retired dogs', X.checks.sterilise, 'Flag retired dogs with no sterilisation recorded', !can)}
+    ${toggle('x-papers', 'Import papers for imported dogs', X.checks.papers, S.bridgeVersion < DOC_BRIDGE ? 'Needs the newest bridge script, which adds documents' : 'Flag active imported dogs without an import permit, export health certificate and overseas vaccination record in their documents', !can || S.bridgeVersion < DOC_BRIDGE)}
     ${numField('x-soon', 'Warn this many days before something is due', X.dueSoonDays, 'Vaccinations and parasite treatments show as “coming up” from this point', 1, 90)}
     <div><button class="btn primary" data-action="save-shared" data-part="checks" ${can ? '' : 'disabled'}>Save checks</button></div>
   </section>
@@ -105,7 +106,7 @@ function afterSettings() {
 function sharedPatch(part) {
   const num = id => { const v = ($('#' + id) || {}).value; return v === '' || v == null ? null : Number(v); };
   const chk = id => !!($('#' + id) || {}).checked;
-  if (part === 'checks') return { checks: { licence: chk('x-licence'), healthcheck: chk('x-health'), sterilise: chk('x-steril') }, dueSoonDays: num('x-soon') || 14 };
+  if (part === 'checks') return { checks: { licence: chk('x-licence'), healthcheck: chk('x-health'), sterilise: chk('x-steril'), papers: chk('x-papers') }, dueSoonDays: num('x-soon') || 14 };
   if (part === 'rules') return { breeding: { minAgeMonths: num('r-minage'), maxLittersPer12Months: num('r-12'), minMonthsBetweenLitters: num('r-gap'), maxLitters: num('r-max'), maxCsections: num('r-csec'), retireAgeYears: num('r-retire') } };
   if (part === 'reminders') return { reminders: { enabled: chk('m-email'), hour: +($('#m-hour') || {}).value || 0, extra: ($('#m-extra') || {}).value || '' } };
   return {};

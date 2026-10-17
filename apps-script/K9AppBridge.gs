@@ -1,5 +1,5 @@
 /**
- * K-9 Salon App Bridge (version 3)
+ * K-9 Salon App Bridge (version 4)
  * Lets the K-9 Salon Manager desktop app read and save your kennel records sheet.
  * This script runs in your own Google account. It does not touch your Pet Tools script.
  *
@@ -23,16 +23,21 @@
  */
 
 const SPREADSHEET_ID = '__SHEET_ID__';
-const BRIDGE_VERSION = 3;
+const BRIDGE_VERSION = 4;
 const CHANGE_TAB = 'App Change Log';
 const CHANGE_HEADERS = ['Time', 'Person', 'Action', 'Tab', 'Row', 'Dog', 'Field', 'Before', 'After'];
 const CHANGE_LOG_LIMIT = 400;
 const PHOTO_TAB = 'App Photos';
 const PHOTO_HEADERS = ['Dog', 'File ID', 'Added', 'Added By'];
 const PHOTO_FOLDER = 'K-9 Salon Dog Photos';
+const DOC_TAB = 'App Documents';
+const DOC_HEADERS = ['File ID', 'Animal ID', 'Microchip No.', 'Dog', 'Type', 'Document Date', 'Country', 'Notes', 'File Name', 'File Type', 'Linked Tab', 'Linked Row', 'Added', 'Added By', 'Removed'];
+const DOC_FOLDER = 'K-9 Salon Dog Documents';
+const DOC_TYPES = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+const DOC_MAX_CHARS = 14000000; // about 10 MB once decoded
 const MASTER_TAB = 'All Breeds';
 const DEFAULT_SETTINGS = {
-  checks: { licence: true, healthcheck: true, sterilise: true },
+  checks: { licence: true, healthcheck: true, sterilise: true, papers: false },
   dueSoonDays: 14,
   breeding: {
     minAgeMonths: 12, maxLittersPer12Months: null, maxLitters: null, maxCsections: null,
@@ -100,6 +105,9 @@ function doPost(e) {
       case 'photo_upload': return out_(photoUpload_(ss, p, who));
       case 'photo_get': return out_(photoGet_(ss, p));
       case 'digest_test': return out_(digestTest_(ss));
+      case 'doc_upload': return out_(docUpload_(ss, p, who));
+      case 'doc_get': return out_(docGet_(ss, p));
+      case 'doc_remove': return out_(docRemove_(ss, p, who));
       default: return out_({ ok: false, error: 'bad_action' });
     }
   } catch (err) {
@@ -109,7 +117,7 @@ function doPost(e) {
 
 /* ---------- reading ---------- */
 
-const PROTECTED_TABS = [CHANGE_TAB, PHOTO_TAB];
+const PROTECTED_TABS = [CHANGE_TAB, PHOTO_TAB, DOC_TAB];
 const SPILLS = /ARRAYFORMULA|^=\s*\{|\b(QUERY|FILTER|SORT|SORTN|UNIQUE|BYROW|BYCOL|MAP|SCAN|MAKEARRAY|SEQUENCE|IMPORTRANGE|FLATTEN|SPLIT|TRANSPOSE)\s*\(/i;
 
 /**
@@ -121,16 +129,19 @@ function read_(ss, wanted, limits) {
   const lim = limits && typeof limits === 'object' ? limits : {};
   const tabs = {};
   let photos = {};
+  let docs = [];
+  let docsError = false;
   ss.getSheets().forEach(function (sh) {
     const name = sh.getName();
     if (name === PHOTO_TAB) { photos = photoIndex_(sh); return; }
+    if (name === DOC_TAB) { try { docs = docIndex_(sh); } catch (e) { docs = null; docsError = true; } return; } // a damaged list mustn't stop the app
     if (want && want.indexOf(name) < 0) return;
     const n = name === CHANGE_TAB ? CHANGE_LOG_LIMIT : Math.max(0, Math.min(50000, Number(lim[name]) || 0));
     tabs[name] = readTab_(sh, tz, n);
   });
   return {
     ok: true, title: ss.getName(), url: ss.getUrl(), tz: tz, version: BRIDGE_VERSION, tabs: tabs,
-    settings: getSettings_(), photos: photos, reminders: { installed: reminderTriggers_().length > 0 },
+    settings: getSettings_(), photos: photos, docs: docs, docsError: docsError, reminders: { installed: reminderTriggers_().length > 0 },
   };
 }
 
@@ -304,6 +315,7 @@ function applyOps_(ss, ops, who, opId, opHash) {
       if (PROTECTED_TABS.indexOf(String(op.tab)) >= 0) return fail('protected', i, 'The app keeps the “' + op.tab + '” tab itself, so it can’t be edited from here.');
       const t = tabCtx(op.tab);
       if (!t) return fail('no_tab', i, 'The “' + op.tab + '” tab is missing from the sheet.');
+      if (PROTECTED_TABS.indexOf(t.sh.getName()) >= 0) return fail('protected', i, 'The app keeps the “' + t.sh.getName() + '” tab itself, so it can’t be edited from here.'); // the name as Sheets found it, whatever the capitals
       const changes = op.changes || [];
       for (let j = 0; j < changes.length; j++) {
         if (colOf_(t.headers, changes[j].h, changes[j].k) < 0) return fail('no_column', i, 'The “' + op.tab + '” tab has no “' + changes[j].h + '” column. If it was renamed, rename it back, then reload the app. Nothing was saved.');
@@ -816,6 +828,268 @@ function photoGet_(ss, p) {
   const blob = file.getBlob();
   if (!inFolder || !/^image\/(jpeg|png|webp)$/.test(blob.getContentType())) return { ok: false, error: 'server', message: 'Photo not found.' };
   return { ok: true, mime: blob.getContentType(), data: Utilities.base64Encode(blob.getBytes()) };
+}
+
+/* ---------- documents (scans and PDFs of a dog's records) ---------- */
+
+/**
+ * The documents folder. One moved to the bin by hand is taken back out, so older documents stay reachable.
+ * A new folder is made only if the old one can't be found twice running; the old one stays on the list.
+ */
+function docFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('DOC_FOLDER_ID');
+  if (id) {
+    for (let i = 0; i < 2; i++) {
+      try {
+        const f = DriveApp.getFolderById(id);
+        if (f.isTrashed()) f.setTrashed(false);
+        return f;
+      } catch (e) { if (i === 0) Utilities.sleep(800); }
+    }
+  }
+  const before = docFolderIds_();
+  const folder = DriveApp.createFolder(DOC_FOLDER);
+  props.setProperties({ DOC_FOLDER_IDS: JSON.stringify(before.concat(folder.getId()).slice(-20)), DOC_FOLDER_ID: folder.getId() });
+  return folder;
+}
+/** Every documents folder the bridge has made, so files in an older one can still be opened. */
+function docFolderIds_() {
+  const props = PropertiesService.getScriptProperties();
+  let all = [];
+  try { all = JSON.parse(props.getProperty('DOC_FOLDER_IDS') || '[]'); } catch (e) { all = []; }
+  const cur = props.getProperty('DOC_FOLDER_ID');
+  if (cur && all.indexOf(cur) < 0) all.push(cur);
+  return all;
+}
+
+function docTab_(ss) {
+  let sh = ss.getSheetByName(DOC_TAB);
+  if (sh) return sh;
+  sh = ss.insertSheet(DOC_TAB);
+  sh.getRange('A:O').setNumberFormat('@');
+  sh.getRange(1, 1, 1, DOC_HEADERS.length).setValues([DOC_HEADERS]).setFontWeight('bold');
+  sh.setFrozenRows(1);
+  try { sh.hideSheet(); } catch (e) { /* stays visible */ }
+  return sh;
+}
+
+/** Every document still on file, oldest first. */
+function docIndex_(sh) {
+  const out = [];
+  const last = sh.getLastRow();
+  const cols = Math.min(DOC_HEADERS.length, sh.getLastColumn());
+  if (last < 2 || cols < 1) return out;
+  sh.getRange(2, 1, last - 1, cols).getValues().forEach(function (r, i) {
+    const s = DOC_HEADERS.map(function (h, c) { const x = r[c]; return String(x == null ? '' : x).trim(); });
+    if (!s[0] || s[14]) return;
+    out.push({ id: s[0], aid: s[1], chip: s[2], dog: s[3], type: s[4], date: s[5], country: s[6], note: s[7], name: s[8], mime: s[9], tab: s[10], row: Number(s[11]) || null, added: s[12], by: s[13], r: i + 2 });
+  });
+  return out;
+}
+
+const docUrl_ = function (id) { return 'https://drive.google.com/file/d/' + id + '/view'; };
+
+/** True when the decoded bytes really are the kind of file the app says they are. */
+function docBytesOk_(bytes, mime) {
+  const b = function (i) { return (bytes[i] + 256) % 256; };
+  if (bytes.length < 8) return false;
+  if (mime === 'application/pdf') return b(0) === 0x25 && b(1) === 0x50 && b(2) === 0x44 && b(3) === 0x46; // %PDF
+  if (mime === 'image/jpeg') return b(0) === 0xFF && b(1) === 0xD8;
+  if (mime === 'image/png') return b(0) === 0x89 && b(1) === 0x50 && b(2) === 0x4E && b(3) === 0x47;
+  if (mime === 'image/webp') return b(0) === 0x52 && b(1) === 0x49 && b(2) === 0x46 && b(3) === 0x46 && bytes.length >= 12 && b(8) === 0x57 && b(9) === 0x45 && b(10) === 0x42 && b(11) === 0x50; // RIFF....WEBP
+  return false;
+}
+
+/**
+ * doc_upload: files a scan or PDF in the documents folder and lists it in the App Documents tab.
+ * With link {tab, row, expect}, the record must still be the one the app showed (expect, as in saves) and belong
+ * to the same dog; its link column is filled in if empty. The same opId on a retry returns the first result.
+ */
+function docUpload_(ss, p, who) {
+  let aid = String(p.aid || '').replace(/[\x00-\x1f]+/g, ' ').trim();
+  const chip = String(p.chip || '').replace(/\D/g, '');
+  const bad = function (m) { return { ok: false, error: 'invalid', message: m }; };
+  if (chip && !/^\d{6,20}$/.test(chip)) return bad('That microchip number can’t be used to file a document.');
+  if (aid.length > 40) { if (!chip) return bad('That animal ID is too long to file a document under.'); aid = ''; }
+  if (!aid && !chip) return bad('This dog has no animal ID or microchip to file the document under.');
+  const type = String(p.type || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 60);
+  if (!type) return bad('Choose what kind of document this is.');
+  const date = String(p.date || '').trim();
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return bad('The document date isn’t a date.');
+  const mime = String(p.mime || '');
+  if (!DOC_TYPES[mime]) return bad('Documents must be a PDF or a JPEG, PNG or WebP picture.');
+  const data = String(p.data || '');
+  if (!data) return bad('The file is empty.');
+  if (data.length > DOC_MAX_CHARS) return bad('The file is too large (10 MB at most).');
+  const bytes = Utilities.base64Decode(data);
+  if (!docBytesOk_(bytes, mime)) return bad('The file isn’t a readable ' + (mime === 'application/pdf' ? 'PDF' : 'picture') + '.');
+  const clip = function (x, n) { return String(x || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, n); };
+  const dog = clip(p.dog, 80), country = clip(p.country, 60), note = clip(p.note, 300);
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) return { ok: false, error: 'locked' };
+  try {
+    const cache = CacheService.getScriptCache();
+    const cacheKey = p.opId ? 'op:' + String(p.opId).slice(0, 80) : '';
+    if (cacheKey) {
+      const hit = cache.get(cacheKey);
+      if (hit) {
+        const prev = JSON.parse(hit);
+        if (prev.hash !== String(p.opHash || '')) return { ok: false, error: 'changed_after_save' };
+        prev.result.replay = true;
+        return prev.result;
+      }
+    }
+    const tz = ss.getSpreadsheetTimeZone();
+    const stamp = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm');
+    const base = [aid || chip, dog, '-', type, date || stamp.slice(0, 10)].join(' ').replace(/[^\w .()'-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const fileName = base + '.' + DOC_TYPES[mime];
+    const file = docFolder_().createFile(Utilities.newBlob(bytes, mime, fileName));
+    const id = file.getId();
+    let sh = null, row = 0, link = null;
+    try {
+      file.setDescription('K-9 Salon document: ' + type + ' for ' + (dog || aid || chip));
+      // 1 · the list first, so a link is never written for a document that isn't listed
+      sh = docTab_(ss);
+      row = sh.getLastRow() + 1;
+      if (row > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), 100);
+      sh.getRange(row, 1, 1, DOC_HEADERS.length).setValues([[id, aid, chip, dog, type, date, country, note, fileName, mime, '', '', stamp, who, '']]);
+      // 2 · then the record it goes with
+      const log = [[stamp, who, 'Document', DOC_TAB, row, dog || aid || chip, type, '', fileName]];
+      let skipped = '';
+      if (p.link && p.link.tab && p.link.row) {
+        link = docLink_(ss, { tab: p.link.tab, row: p.link.row, expect: p.link.expect, type: type }, chip, id, tz);
+        if (link.linked) sh.getRange(row, 11, 1, 2).setValues([[link.tab, String(link.row)]]);
+        else skipped = link.why;
+        if (link.wrote) log.push([stamp, who, 'Edited', link.tab, link.row, dog || aid || chip, link.header, '', docUrl_(id)]);
+      }
+      appendLog_(ss, log);
+      const result = { ok: true, doc: { id: id, aid: aid, chip: chip, dog: dog, type: type, date: date, country: country, note: note, name: fileName, mime: mime, tab: link && link.linked ? link.tab : '', row: link && link.linked ? link.row : null, added: stamp, by: who, r: row }, linkWritten: !!(link && link.wrote), linkSkipped: skipped };
+      if (cacheKey) { try { cache.put(cacheKey, JSON.stringify({ hash: String(p.opHash || ''), result: result }), 21600); } catch (e) { /* too large to remember */ } }
+      return result;
+    } catch (err) {
+      // undo: the file to the bin, the list row marked, the link cleared
+      try { file.setTrashed(true); } catch (e) { /* leave it */ }
+      try { if (sh && row) sh.getRange(row, 15).setValue(stamp + ' · not saved'); } catch (e) { /* leave it */ }
+      try { if (link && link.wrote && link.cell) link.cell.clearContent(); } catch (e) { /* leave it */ }
+      throw err;
+    }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Links a document to a record. The record must still hold what the app showed (link.expect) and its first
+ * microchip column must be this dog's. The document's address goes into the record's link column only when there
+ * is one fitting column (a header ending in "Link"; with several, the one sharing a word with the type), the cell
+ * is empty, and no formula fills it.
+ */
+function docLink_(ss, link, chip, id, tz) {
+  const tab = String(link.tab), row = Number(link.row);
+  const out = { tab: tab, row: row, linked: false, wrote: false, why: 'changed' };
+  const sh = ss.getSheetByName(tab);
+  if (!sh || PROTECTED_TABS.indexOf(sh.getName()) >= 0 || !chip || !(row >= 2 && row <= sh.getLastRow())) return out;
+  out.tab = sh.getName();
+  const lastCol = sh.getLastColumn(), lastRow = sh.getLastRow();
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
+  const range = sh.getRange(row, 1, 1, lastCol);
+  const vals = range.getValues()[0], forms = range.getFormulas()[0];
+  const ci = colInfo_(sh, lastRow, lastCol);
+  // the same check saves use: the row still holds what the app showed
+  const expect = Array.isArray(link.expect) ? link.expect : [];
+  if (!expect.length) return out;
+  let display = null;
+  for (let j = 0; j < expect.length; j++) {
+    const ex = expect[j], c = colOf_(headers, ex.h, ex.k);
+    if (c < 0 || forms[c] || ci.spill.indexOf(c) >= 0) continue;
+    let now = cell_(vals[c], tz);
+    if (now === TIME_ONLY) { if (!display) display = range.getDisplayValues()[0]; now = display[c]; }
+    if (!same_(now === false ? '' : now, ex.v, ex.kind)) return out;
+  }
+  let chipCol = -1;
+  for (let c = 0; c < headers.length; c++) if (/microchip/i.test(headers[c]) && !/puppy/i.test(headers[c])) { chipCol = c; break; }
+  if (chipCol < 0 || String(vals[chipCol]).replace(/\D/g, '') !== chip) { out.why = 'other_dog'; return out; }
+  out.linked = true; out.why = '';
+  const links = [];
+  for (let c = 0; c < headers.length; c++) if (/link$/i.test(headers[c]) && ci.computed.indexOf(c) < 0) links.push(c);
+  let lc = links.length === 1 ? links[0] : -1;
+  if (links.length > 1) {
+    const words = String(link.type || '').toLowerCase().split(/[^a-z]+/).filter(function (w) { return w.length >= 4; });
+    const fit = links.filter(function (c) { const h = headers[c].toLowerCase(); return words.some(function (w) { return h.indexOf(w) >= 0; }); });
+    if (fit.length === 1) lc = fit[0];
+  }
+  if (lc < 0 || isData_(vals[lc]) || forms[lc]) return out;
+  const cell = sh.getRange(row, lc + 1);
+  if (ruleProblem_(cell.getDataValidations()[0][0], docUrl_(id))) return out;
+  cell.setValue(docUrl_(id));
+  out.wrote = true; out.cell = cell; out.header = headers[lc];
+  return out;
+}
+
+function docInFolder_(file) {
+  const ids = docFolderIds_();
+  if (!ids.length) return false;
+  const parents = file.getParents();
+  while (parents.hasNext()) if (ids.indexOf(parents.next().getId()) >= 0) return true;
+  return false;
+}
+
+function docGet_(ss, p) {
+  const id = String(p.id || '');
+  const sh = ss.getSheetByName(DOC_TAB);
+  const none = { ok: false, error: 'server', message: 'That document isn’t on file any more.' };
+  if (!id || !sh || !docIndex_(sh).some(function (d) { return d.id === id; })) return none;
+  try { // a documents folder moved to the bin by hand comes back out, with the files in it
+    const f = DriveApp.getFolderById(PropertiesService.getScriptProperties().getProperty('DOC_FOLDER_ID'));
+    if (f.isTrashed()) f.setTrashed(false);
+  } catch (e) { /* no folder yet */ }
+  let file;
+  try { file = DriveApp.getFileById(id); } catch (e) { return none; }
+  if (file.isTrashed() || !docInFolder_(file)) return none;
+  const blob = file.getBlob();
+  if (!DOC_TYPES[blob.getContentType()]) return none;
+  return { ok: true, mime: blob.getContentType(), name: file.getName(), data: Utilities.base64Encode(blob.getBytes()) };
+}
+
+/**
+ * doc_remove: takes a document off the list and moves the file to the Drive bin, where it can still be restored.
+ * Its link is cleared wherever it is in the record's tab, even if rows were sorted since.
+ */
+function docRemove_(ss, p, who) {
+  const id = String(p.id || '');
+  const sh = ss.getSheetByName(DOC_TAB);
+  if (!id || !sh) return { ok: false, error: 'server', message: 'That document isn’t on file any more.' };
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) return { ok: false, error: 'locked' };
+  try {
+    const doc = docIndex_(sh).filter(function (d) { return d.id === id; })[0];
+    if (!doc) return { ok: true, already: true };
+    const tz = ss.getSpreadsheetTimeZone();
+    const stamp = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm');
+    sh.getRange(doc.r, 15).setValue(stamp + ' · ' + who);
+    const log = [[stamp, who, 'Removed', DOC_TAB, doc.r, doc.dog || doc.aid || doc.chip, doc.type, doc.name, '']];
+    try { const f = DriveApp.getFileById(id); if (docInFolder_(f)) f.setTrashed(true); } catch (e) { /* already gone */ }
+    const t = doc.tab && ss.getSheetByName(doc.tab);
+    if (t && PROTECTED_TABS.indexOf(t.getName()) < 0 && t.getLastRow() >= 2) {
+      const lastCol = t.getLastColumn(), lastRow = t.getLastRow();
+      const headers = t.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
+      for (let c = 0; c < headers.length; c++) {
+        if (!/link$/i.test(headers[c])) continue;
+        const vals = t.getRange(2, c + 1, lastRow - 1, 1).getValues();
+        for (let r = 0; r < vals.length; r++) {
+          if (String(vals[r][0]).trim() !== docUrl_(id)) continue;
+          t.getRange(r + 2, c + 1).clearContent();
+          log.push([stamp, who, 'Edited', t.getName(), r + 2, doc.dog || doc.aid || doc.chip, headers[c], docUrl_(id), '']);
+        }
+      }
+    }
+    appendLog_(ss, log);
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /* ---------- daily reminder email ---------- */

@@ -71,6 +71,10 @@ function deskLoad() {
     S.bridgeVersion = res.version || 1;
     if (res.settings) S.shared = mergeShared(res.settings);
     S.photos = res.photos || {};
+    // a list that couldn't be read keeps what was shown before, and nothing on this computer is cleared
+    S.docsError = !Array.isArray(res.docs) && !!res.docsError;
+    if (Array.isArray(res.docs)) { S.docs = res.docs; if (window.k9.docPrune) window.k9.docPrune(S.docs.map(x => x.id)).catch(() => {}); }
+    else if (!S.docsError) S.docs = [];
     S.reminders = res.reminders || { installed: false };
     if (!res.tabs || !res.tabs[MASTER]) { S.conn = { state: 'error', code: 'no_master', msg: 'The spreadsheet has no “All Breeds” tab. Rename the main tab back to “All Breeds”.', at: 0 }; renderAll(); return; }
     applyDb(parseBridge(res), Date.now());
@@ -167,10 +171,18 @@ function setupView() {
   <p class="muted small">Anyone with both the URL and the key could read and change the sheet, so keep them private. To change the key, run <code>resetAppKey</code> in the script and paste the new key here.</p>
   </div>`;
 }
+/** What updating the bridge would add, from the version in use now. */
+function bridgeNews() {
+  const v = S.bridgeVersion || 1, parts = [];
+  if (v < NEED_BRIDGE) parts.push('bulk logging, litters, dog photos, reminder emails, change history and shared settings');
+  if (v < DOC_BRIDGE) parts.push('documents for each dog (photos and PDFs of records and import papers)');
+  if (v < 3) parts.push('your sheet’s dropdown lists in the app');
+  return parts.length ? `The update adds ${parts.join(', and ')}.` : 'It’s up to date.';
+}
 function openBridgeHelp() {
   modal('bridge', {
     title: 'Update the bridge script', narrow: false,
-    sub: `Your bridge is version ${S.bridgeVersion || 1}. ${S.bridgeVersion < NEED_BRIDGE ? 'The update adds bulk logging, litters, dog photos, reminder emails, change history and shared settings, and lets the app use your sheet’s dropdown lists.' : `Version ${BRIDGE_LATEST} lets the app use your sheet’s dropdown lists, so choices like Status, Sterilised and Kennel No. match the sheet.`}`,
+    sub: `Your bridge is version ${S.bridgeVersion || 1}. ${bridgeNews()}`,
     body: `<ol class="steps compact">
       <li><div><b>Copy the new script</b><p>Your sheet’s ID is filled in for you.</p><div class="row"><button class="btn primary sm" data-action="copy-script">${icon('copy')}Copy bridge script</button></div></div></li>
       <li><div><b>Replace the old code</b><p>Open your <b>K-9 Salon App Bridge</b> project at script.google.com, select all the code (Ctrl+A), paste (Ctrl+V) and save (Ctrl+S).</p><div class="row"><a class="btn sm" href="https://script.google.com/home" target="_blank" rel="noopener">${icon('ext')}Open Apps Script</a></div></div></li>
