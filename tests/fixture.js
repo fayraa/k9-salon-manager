@@ -17,7 +17,7 @@ const dogs = NAMES.map((name, i) => {
 });
 dogs.push(['T021', chip(20), '', 'MALTIPOO', 'CREAM', 'F', ago(40), '1 month', '', 'Test Kennel', '', 'Active', '', '', '', 'Bred in-house', chip(0), chip(2), '', '']);
 dogs.push(['T022', chip(21), 'Olive', 'MALTESE', 'WHITE', 'F', ago(900), '2y', '', 'Test Kennel', '2', '', 'A very long remark', '', '', 'Local breeder', '', '', '', '']);
-const rows = list => list.map((v, i) => ({ r: i + 2, v }));
+const rows = list => list.map((v, i) => ({ r: i + 2, v: v.slice() })); // copies, so one test's changes don't leak into the next
 
 function readResponse({ version = 2, settings } = {}) {
   const tabs = {

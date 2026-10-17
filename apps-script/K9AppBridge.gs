@@ -509,13 +509,14 @@ function ruleProblem_(rule, v) {
     if (rule.getAllowInvalid()) return '';
     const type = String(rule.getCriteriaType());
     const args = rule.getCriteriaValues() || [];
-    const text = String(v).replace(/^'/, '');
+    const text = String(v).replace(/^'/, '').trim();
+    const trim = function (s) { return String(s).trim(); }; // the same as the lists the app is sent
     if (type === 'VALUE_IN_LIST') {
-      const list = (args[0] || []).map(String);
+      const list = (args[0] || []).map(trim);
       return list.indexOf(text) >= 0 ? '' : 'only accepts: ' + list.slice(0, 12).join(', ') + '.';
     }
     if (type === 'VALUE_IN_RANGE' && args[0] && args[0].getDisplayValues) {
-      const list = [].concat.apply([], args[0].getDisplayValues()).map(String).filter(String);
+      const list = [].concat.apply([], args[0].getDisplayValues()).map(trim).filter(String);
       return list.indexOf(text) >= 0 ? '' : 'only accepts: ' + list.slice(0, 12).join(', ') + '.';
     }
     if (type === 'CHECKBOX') {

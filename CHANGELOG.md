@@ -9,8 +9,9 @@
 - Sterilised marked **Exempted** no longer shows as a to-do, and **Pending** shows as coming up.
 
 **Safer saving**
-- Quick fill checks each dog's ID, microchip and name before saving, and never puts the same microchip or licence number on two dogs.
+- Quick fill checks each dog's ID, microchip and name before saving. It won't give two dogs the same microchip or licence number, and dogs swapping numbers are saved together.
 - Long lists save in groups of 40, so a big fill-in stays well inside Google's time limit. If one group fails, the groups before it stay saved and the app says how far it got.
+- If a dog changes in the sheet while the list is open, the app reloads and keeps what you typed for the other dogs. It never moves what you typed onto a different dog.
 - Editing a row that has an unticked tick box no longer fails as “changed in the sheet”.
 
 ## 1.1.0

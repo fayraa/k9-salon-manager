@@ -387,6 +387,7 @@ td .before{text-decoration:line-through;color:var(--muted)}
 .qf-table th[scope="row"] small{display:block;color:var(--muted);font-size:13.5px;line-height:1.4}
 .qf-table td{padding:6px 10px;min-width:190px}
 .qf-table .inp,.qf-table .sel{width:100%;min-height:40px}
+.qf-table textarea.inp,.qf-fill textarea.inp{min-height:40px;resize:vertical;line-height:1.4;display:block}
 .qf-table td.chg{box-shadow:inset 4px 0 0 var(--accent)}
 .qf-table td.chg .inp,.qf-table td.chg .sel{border-color:var(--accent);background:var(--accent-soft)}
 .qf-table tr.bad th,.qf-table tr.bad td{background:var(--crit-soft)}

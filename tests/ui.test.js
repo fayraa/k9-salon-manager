@@ -473,8 +473,8 @@ test('quick fill offers the sheet’s dropdown choices and fills only the blank 
   assert.equal(await page.locator('.qf-table tbody tr').count(), 2);
   const opts = await page.$$eval('#qf-0-0 option', os => os.map(o => o.value));
   assert.deepEqual(opts, ['', 'Yes', 'Y', 'N', 'Pending', 'Exempted'], 'the sheet’s choices, plus the value already there');
-  await page.selectOption('#qf-fill-8', 'Y');
-  await page.click('[data-qf-fill="8"]');
+  await page.selectOption('#qf-fill-0', 'Y');
+  await page.click('[data-qf-fill="0"]');
   assert.match(await page.textContent('#qf-msg'), /Filled 1 blank box/);
   assert.equal(await page.inputValue('#qf-0-0'), 'Yes', 'a box that already had a value is left alone');
   assert.equal(await page.inputValue('#qf-1-0'), 'Y');
@@ -498,8 +498,8 @@ test('quick fill saves a long list in groups, and a group Google didn’t confir
   await page.waitForSelector('.qf-table');
   assert.equal(await page.inputValue('#qf-which'), 'blank-active');
   assert.equal(await page.locator('.qf-table tbody tr').count(), 71, 'the new dogs and the unnamed puppy have no kennel');
-  await page.selectOption('#qf-fill-10', '3');
-  await page.click('[data-qf-fill="10"]');
+  await page.selectOption('#qf-fill-0', '3');
+  await page.click('[data-qf-fill="0"]');
   await page.click('#qf-save');
   await page.waitForFunction(() => /won’t be saved twice/.test(document.querySelector('#qf-msg').textContent));
   assert.match(await page.textContent('#qf-msg'), /Saved 40 of 71 dogs/);
@@ -533,7 +533,7 @@ test('quick fill: when a dog changed in the sheet meanwhile, it reloads and keep
   await page.waitForFunction(() => /press Save again/.test(document.querySelector('#qf-msg').textContent));
   const msg = await page.textContent('#qf-msg');
   assert.match(msg, /Biscuit \(T001\) was changed in the sheet/);
-  assert.match(msg, /1 box someone else had already changed now shows the sheet’s value/);
+  assert.match(msg, /1 box that changed in the sheet was put back to the sheet’s value/);
   assert.equal(await page.inputValue('#qf-0-0'), 'LIC-3001', 'what you typed for other dogs is kept');
   assert.match(await page.textContent('#qf-count'), /1 dog changed/);
   await page.click('#qf-save');
@@ -585,6 +585,99 @@ test('an older bridge still works and suggests the update without getting in the
   await page.waitForFunction(() => !document.querySelector('.ov'));
   await page.click('[data-action="bridge-later"]');
   assert.equal(await page.locator('.banner.soft').count(), 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('quick fill never moves what you typed onto another dog when microchips are swapped in the sheet meanwhile', async () => {
+  const { page, errors, ctx, calls } = await openApp({ version: 3 });
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('#top-act [data-action="quick-fill"]');
+  await page.waitForSelector('.qf-table');
+  await page.fill('#qf-1-0', 'LIC-FOR-PEPPER'); // Pepper (T003)
+  const changed = readResponse({ version: 3 });
+  const rows = changed.tabs['All Breeds'].rows;
+  rows[0].v[1] = chip(2); rows[2].v[1] = chip(0); // someone swaps Biscuit’s and Pepper’s microchips
+  await page.evaluate(r => { window.__k9.read = r; window.__k9.failNext = { error: 'row_changed', index: 0 }; }, changed);
+  await page.click('#qf-save');
+  await page.waitForFunction(() => /press Save again/.test(document.querySelector('#qf-msg').textContent));
+  assert.equal(await page.textContent('#qf-count'), '', 'the typed licence is dropped, because the app can’t be sure which dog it was for');
+  assert.ok(!(await page.$$eval('.qf-table input', els => els.map(e => e.value))).includes('LIC-FOR-PEPPER'));
+  await page.click('#qf-save');
+  assert.match(await page.textContent('#qf-msg'), /Nothing has changed yet/);
+  assert.equal((await calls()).filter(c => c.action === 'batch').length, 1, 'nothing more is sent');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('quick fill still catches a repeated microchip after part of a long list was saved', async () => {
+  const { page, errors, ctx, calls } = await openApp({ read: bigHerd(45) });
+  await page.evaluate(() => { window.__k9.failAt = { n: 2, res: { error: 'timeout' } }; });
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('#top-act [data-action="quick-fill"]');
+  await page.waitForSelector('.qf-table');
+  await page.selectOption('#qf-what', 'chip');
+  await page.selectOption('#qf-which', 'all');
+  await page.evaluate(() => { for (let i = 0; i < 41; i++) { const el = document.getElementById(`qf-${i}-0`); el.value = '999111000' + String(200000 + i); el.dispatchEvent(new Event('input', { bubbles: true })); } });
+  await page.click('#qf-save');
+  await page.waitForFunction(() => /won’t be saved twice/.test(document.querySelector('#qf-msg').textContent));
+  assert.match(await page.textContent('#qf-count'), /^1 dog changed/);
+  assert.equal(await page.inputValue('#qf-0-0'), '999111000200000', 'the saved chip shows in the list');
+  const other = await page.inputValue('#qf-50-0');
+  await page.fill('#qf-0-0', other); // a dog saved in the first group gets another dog’s chip
+  await page.click('#qf-save');
+  assert.match(await page.textContent('#qf-msg'), /is on .*Each dog needs its own/);
+  assert.equal((await calls()).filter(c => c.action === 'batch').length, 2, 'nothing more is sent');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('quick fill sends dogs swapping microchips together in the first group', async () => {
+  const { page, errors, ctx, calls } = await openApp({ read: bigHerd(45) });
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('#top-act [data-action="quick-fill"]');
+  await page.waitForSelector('.qf-table');
+  await page.selectOption('#qf-what', 'chip');
+  await page.selectOption('#qf-which', 'all');
+  const a = await page.inputValue('#qf-0-0'), b = await page.inputValue('#qf-60-0');
+  await page.fill('#qf-0-0', b);
+  await page.fill('#qf-60-0', a);
+  await page.evaluate(() => { for (let i = 1; i <= 41; i++) { const el = document.getElementById(`qf-${i}-0`); el.value = '999222000' + String(300000 + i); el.dispatchEvent(new Event('input', { bubbles: true })); } });
+  await page.click('#qf-save');
+  await page.waitForSelector('.toast');
+  const batches = (await calls()).filter(c => c.action === 'batch');
+  assert.deepEqual(batches.map(x => x.ops.length), [2, 40, 1]);
+  assert.deepEqual(batches[0].ops.map(op => op.changes[0].v).sort(), [a, b].sort(), 'the swap is saved all at once');
+  assert.match(await page.textContent('.toasts'), /Saved 43 dogs/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('quick fill keeps line breaks in remarks and keeps focus on Fill blanks', async () => {
+  const read = readResponse({ version: 3 });
+  read.tabs['All Breeds'].rows[0].v[12] = 'Line one\nLine two';
+  const { page, errors, ctx, calls } = await openApp({ read });
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('#top-act [data-action="quick-fill"]');
+  await page.waitForSelector('.qf-table');
+  await page.selectOption('#qf-what', 'col:Remarks');
+  await page.selectOption('#qf-which', 'all');
+  assert.equal(await page.inputValue('#qf-0-0'), 'Line one\nLine two');
+  await page.focus('#qf-0-0');
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('x');
+  await page.keyboard.press('Backspace');
+  assert.equal(await page.textContent('#qf-count'), '', 'typing and undoing changes nothing');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Line three');
+  await page.fill('#qf-fill-0', 'Checked');
+  await page.click('[data-qf-fill="0"]');
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.qfFill), '0', 'focus stays on the button');
+  await page.click('#qf-save');
+  await page.waitForFunction(() => window.__k9.calls.some(c => c.action === 'batch'));
+  const ops = (await calls()).find(c => c.action === 'batch').ops;
+  assert.equal(ops[0].changes[0].v, 'Line one\nLine two\nLine three');
+  assert.ok(ops.slice(1).every(op => op.changes[0].v === 'Checked'));
   assert.deepEqual(errors, []);
   await ctx.close();
 });

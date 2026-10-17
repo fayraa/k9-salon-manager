@@ -103,7 +103,7 @@ const topOverlay = kind => { const o = OV[OV.length - 1]; return o && (!kind || 
 function trapFocus(e) {
   const o = OV[OV.length - 1];
   if (!o || e.key !== 'Tab') return;
-  const items = $$('a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])', o.el).filter(x => x.offsetParent !== null && !x.classList.contains('scrim'));
+  const items = $$('a[href],button:not(:disabled),input:not(:disabled):not([type=hidden]),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])', o.el).filter(x => x.offsetParent !== null && !x.classList.contains('scrim'));
   if (!items.length) return;
   const first = items[0], last = items[items.length - 1];
   if (!o.el.contains(document.activeElement)) { e.preventDefault(); first.focus(); return; }
