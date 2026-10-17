@@ -1,0 +1,41 @@
+name: Weekly health check
+on:
+  schedule:
+    - cron: '0 1 * * 1' # Mondays 09:00 Singapore time
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Build and syntax checks
+        run: npm run check
+      - name: Tests
+        run: npm test
+      - name: Security audit (shipped code only)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Windows build still packages
+        run: npx electron-builder --win dir --x64 --publish never
+      - name: Outdated packages (for information)
+        if: always()
+        run: |
+          echo '## Outdated packages' >> "$GITHUB_STEP_SUMMARY"
+          npm outdated --long >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Open an issue if something failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Weekly health check failed"
+          if ! gh issue list --state open --search "$title in:title" --json number --jq '.[0].number' | grep -q .; then
+            gh issue create --title "$title" --body "The weekly check failed on $(date -u +%Y-%m-%d). See ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi

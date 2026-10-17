@@ -1,0 +1,37 @@
+name: Release
+on:
+  push:
+    tags: ['v*.*.*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Add yourself as a required reviewer for this environment in GitHub (Settings → Environments → release)
+    # so no release reaches installed apps until you approve it.
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Tag matches package.json
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      - run: sudo apt-get update && sudo apt-get install -y nsis
+      - run: npm ci
+      - run: npm run check
+      - run: npm run test:unit
+      - name: Build the Windows app
+        run: npx electron-builder --win dir --x64 --publish never
+      - name: Build the installer
+        run: node scripts/make-installer.js
+      - name: Release info
+        run: node scripts/release-info.js
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/K-9-Salon-Manager-Setup-${GITHUB_REF_NAME#v}.exe" dist/latest.json \
+            --title "K-9 Salon Manager ${GITHUB_REF_NAME#v}" --notes-file dist/release-notes.md

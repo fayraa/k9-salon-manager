@@ -1,0 +1,409 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { Sheet_, Spreadsheet_, loadBridge, Utilities } = require('./gas-mock');
+
+const TZ = 'Asia/Kuala_Lumpur';
+const D = s => Utilities.parseDate(s, TZ, 'yyyy-MM-dd');
+const iso = d => Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
+const today = () => iso(new Date());
+const addDays = (s, n) => iso(new Date(D(s).getTime() + n * 864e5));
+
+const AB = ['Animal ID', 'Microchip No.', 'Name', 'Breed', 'Colour', 'Sex', 'Date of Birth', 'Age', 'Sterilised', 'Premise', 'Kennel No.', 'Status', 'Remarks', 'Vaccination Status', 'Next Vaccination Date', 'Source', 'Dam Microchip', 'Sire Microchip', 'PALS Licence No.', 'Licence Expiry'];
+const VAC = ['Microchip No.', 'Dog Name', 'Date Given', 'Vaccine Type', 'Batch No.', 'Administering Vet', 'Vet Licence No.', 'Clinic', 'Next Due Date', 'Certificate No.', 'Signature Date'];
+const DHM = ['S/N', 'Date', 'Microchip No.', 'General', 'Skin/Eyes/Ears/Oral/Nasal', 'Limbs', 'Heart/Lungs', 'Fit for Breeding', 'Remarks', 'Vaccine Label'];
+const MAT = ['Date of Mating', 'Dam Microchip', 'Dam Name', 'Sire #1 Microchip', 'Sire #1 Name', 'Sire #2 Microchip', 'Sire #2 Name', 'Successful', 'Expected Whelp Date', 'Notes'];
+const LIT = ['Dam Microchip', 'Dam Breed', 'Dam DOB', 'Dam Source', 'Sire Microchip', 'Sire Breed', 'Litter DOB', 'Delivery Method', 'Litter No.', 'No. of Puppies', 'Puppy Microchips', 'Sex Breakdown', 'Colours', 'Date Out', 'Status', 'Notes'];
+
+function fixture() {
+  const dogs = [
+    ['A001', '999000000000101', 'Biscuit', 'MALTIPOO', 'APRICOT', 'F', D('2022-06-23'), '', '', 'Test Kennel - Breeding', 1, 'Active'],
+    ['A002', '999000000000102', 'Pepper', 'BICHON FRISE', 'WHITE', 'M', D('2022-11-01'), '', '', 'Test Kennel - Breeding', 1, 'Active'],
+    ['A009', '999000000000103', 'Toffee', 'MALTIPOO', 'CREAM', 'F', D('2021-01-05'), '', '', 'Test Kennel - Breeding', 2, 'Active'],
+  ];
+  const formulas = {}, formats = {};
+  dogs.forEach((_, i) => { formulas[`${i + 2},8`] = '=IF(R[0]C[-1]="","",DATEDIF(R[0]C[-1],TODAY(),"Y"))'; formats[`${i + 2},2`] = '@'; formats[`${i + 2},7`] = 'dd/mm/yyyy'; });
+  const ab = new Sheet_('All Breeds', [AB, ...dogs], { formulas, formats });
+  const vac = new Sheet_('Vaccinations', [VAC, ['999000000000101', 'Biscuit', D('2025-10-10'), 'DHPPi', '', '', '', 'Clinic A', D(addDays(today(), -3))]]);
+  const dhm = new Sheet_('Daily Health Monitoring', [DHM, [7, D('2026-10-01'), '999000000000101', 'Normal']]);
+  const mat = new Sheet_('Mating Records', [MAT, [D(addDays(today(), -60)), '999000000000103', 'Toffee', '999000000000102', 'Pepper', '', '', '', D(addDays(today(), 3))]]);
+  const lit = new Sheet_('Puppies Bred In-House', [LIT]);
+  const ss = new Spreadsheet_([ab, vac, dhm, mat, lit]);
+  return { ss, ab, vac, dhm, mat, lit };
+}
+
+test('rejects a wrong key and unknown actions', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  assert.equal(b.post({ key: 'nope', action: 'ping' }).error, 'bad_key');
+  assert.equal(b.post({ action: 'dance' }).error, 'bad_action');
+  const ping = b.post({ action: 'ping' });
+  assert.equal(ping.ok, true);
+  assert.equal(ping.version, 2);
+});
+
+test('read returns rows, formula columns, default settings and no photos', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  const r = b.post({ action: 'read', tabs: ['All Breeds', 'Vaccinations'] });
+  assert.equal(r.ok, true);
+  assert.deepEqual(Object.keys(r.tabs).sort(), ['All Breeds', 'Vaccinations']);
+  const t = r.tabs['All Breeds'];
+  assert.deepEqual(t.formulaCols, [7]);
+  assert.equal(t.rows.length, 3);
+  assert.equal(t.rows[0].v[6], '2022-06-23');
+  assert.equal(r.settings.checks.licence, true);
+  assert.equal(r.settings.breeding.minAgeMonths, 12);
+  assert.deepEqual(r.photos, {});
+});
+
+test('a new dog gets the next animal ID, a text microchip, a real date and the Age formula', () => {
+  const { ss, ab } = fixture();
+  const b = loadBridge(ss);
+  const res = b.post({
+    action: 'save', tab: 'All Breeds', mode: 'new', who: 'Austin', changes: [
+      { h: 'Animal ID', k: 0, v: 'A999', kind: 'text' },
+      { h: 'Microchip No.', k: 0, v: '999000000000199', kind: 'chip' },
+      { h: 'Name', k: 0, v: 'Pip', kind: 'text' },
+      { h: 'Date of Birth', k: 0, v: '2026-06-01', kind: 'date' },
+      { h: 'Kennel No.', k: 0, v: '3', kind: 'text' },
+      { h: 'Remarks', k: 0, v: '=HYPERLINK("x")', kind: 'long' },
+    ],
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.row, 5);
+  assert.equal(res.id, 'A010', 'IDs continue from the highest existing number, ignoring the one the app sent');
+  assert.equal(ab.peek(5, 1).v, 'A010');
+  assert.equal(ab.peek(5, 2).v, '999000000000199');
+  assert.equal(typeof ab.peek(5, 2).v, 'string');
+  assert.ok(ab.peek(5, 7).v instanceof Date);
+  assert.equal(iso(ab.peek(5, 7).v), '2026-06-01');
+  assert.match(ab.peek(5, 7).fmt, /d/);
+  assert.equal(ab.peek(5, 8).f, '=IF(R[0]C[-1]="","",DATEDIF(R[0]C[-1],TODAY(),"Y"))');
+  assert.equal(ab.peek(5, 11).v, 3);
+  assert.equal(ab.peek(5, 13).v, '=HYPERLINK("x")', 'text that looks like a formula stays text');
+  assert.equal(ab.peek(5, 13).f, undefined);
+  const log = ss.getSheetByName('App Change Log');
+  assert.ok(log, 'change log tab is created');
+  assert.equal(log.peek(2, 2).v, 'Austin');
+  assert.equal(log.peek(2, 3).v, 'Added');
+  assert.match(String(log.peek(2, 9).v), /Name: Pip/);
+});
+
+test('an edit writes only changed cells and refuses when the row changed meanwhile', () => {
+  const { ss, ab } = fixture();
+  const b = loadBridge(ss);
+  const ok = b.post({
+    action: 'save', tab: 'All Breeds', mode: 'edit', row: 2, who: 'Austin',
+    changes: [{ h: 'Kennel No.', k: 0, v: '4', kind: 'text' }],
+    expect: [{ h: 'Name', k: 0, v: 'Biscuit', kind: 'text' }, { h: 'Date of Birth', k: 0, v: '2022-06-23', kind: 'date' }, { h: 'Kennel No.', k: 0, v: '1', kind: 'text' }],
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(ab.peek(2, 11).v, 4);
+  const log = ss.getSheetByName('App Change Log');
+  assert.equal(log.peek(2, 7).v, 'Kennel No.');
+  assert.equal(log.peek(2, 8).v, '1');
+  assert.equal(log.peek(2, 9).v, '4');
+
+  const stale = b.post({ action: 'save', tab: 'All Breeds', mode: 'edit', row: 2, changes: [{ h: 'Name', k: 0, v: 'Amy', kind: 'text' }], expect: [{ h: 'Kennel No.', k: 0, v: '1', kind: 'text' }] });
+  assert.equal(stale.ok, false);
+  assert.equal(stale.error, 'row_changed');
+  assert.equal(ab.peek(2, 3).v, 'Biscuit');
+});
+
+test('a batch writes many rows in one block, numbers S/N and keeps the order of results', () => {
+  const { ss, vac, dhm } = fixture();
+  const b = loadBridge(ss);
+  const chips = ['999000000000101', '999000000000102', '999000000000103'];
+  const ops = chips.map(c => ({ tab: 'Vaccinations', mode: 'new', dog: c, changes: [
+    { h: 'Microchip No.', k: 0, v: c, kind: 'chip' }, { h: 'Date Given', k: 0, v: '2026-10-17', kind: 'date' },
+    { h: 'Vaccine Type', k: 0, v: 'Rabies', kind: 'text' }, { h: 'Next Due Date', k: 0, v: '2027-10-17', kind: 'date' }] }));
+  ops.splice(1, 0, { tab: 'Daily Health Monitoring', mode: 'new', changes: [{ h: 'Date', k: 0, v: '2026-10-17', kind: 'date' }, { h: 'Microchip No.', k: 0, v: chips[0], kind: 'chip' }, { h: 'General', k: 0, v: 'Normal', kind: 'text' }] });
+  ops.push({ tab: 'Daily Health Monitoring', mode: 'new', changes: [{ h: 'Date', k: 0, v: '2026-10-17', kind: 'date' }, { h: 'Microchip No.', k: 0, v: chips[1], kind: 'chip' }] });
+  const res = b.post({ action: 'batch', ops, who: 'Austin' });
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.results.map(r => r.row), [3, 3, 4, 5, 4]);
+  assert.equal(vac.log.filter(([op]) => op === 'setValues').length, 1, 'one block write per tab');
+  assert.equal(vac.peek(5, 1).v, '999000000000103');
+  assert.equal(dhm.peek(3, 1).v, 8);
+  assert.equal(dhm.peek(4, 1).v, 9);
+  const log = ss.getSheetByName('App Change Log');
+  assert.equal(log.getLastRow(), 1 + ops.length);
+});
+
+test('a batch with one stale edit writes nothing at all', () => {
+  const { ss, vac, ab } = fixture();
+  const b = loadBridge(ss);
+  const res = b.post({ action: 'batch', ops: [
+    { tab: 'Vaccinations', mode: 'new', changes: [{ h: 'Microchip No.', k: 0, v: '999000000000101', kind: 'chip' }, { h: 'Date Given', k: 0, v: '2026-10-17', kind: 'date' }] },
+    { tab: 'All Breeds', mode: 'edit', row: 3, changes: [{ h: 'Name', k: 0, v: 'Sunny', kind: 'text' }], expect: [{ h: 'Name', k: 0, v: 'Someone else', kind: 'text' }] },
+  ] });
+  assert.equal(res.ok, false);
+  assert.equal(res.error, 'row_changed');
+  assert.equal(res.index, 1);
+  assert.equal(vac.getLastRow(), 2);
+  assert.equal(ab.peek(3, 3).v, 'Pepper');
+  assert.equal(ss.getSheetByName('App Change Log'), null);
+});
+
+test('a litter batch adds puppies with consecutive IDs and marks the mating successful', () => {
+  const { ss, ab, lit, mat } = fixture();
+  const b = loadBridge(ss);
+  const pup = (sex, colour) => ({ tab: 'All Breeds', mode: 'new', changes: [
+    { h: 'Breed', k: 0, v: 'MALTIPOO', kind: 'text' }, { h: 'Sex', k: 0, v: sex, kind: 'sex' }, { h: 'Colour', k: 0, v: colour, kind: 'text' },
+    { h: 'Date of Birth', k: 0, v: '2026-10-15', kind: 'date' }, { h: 'Status', k: 0, v: 'Active', kind: 'status' },
+    { h: 'Dam Microchip', k: 0, v: '999000000000103', kind: 'chip' }, { h: 'Sire Microchip', k: 0, v: '999000000000102', kind: 'chip' }] });
+  const res = b.post({ action: 'batch', who: 'Austin', ops: [
+    { tab: 'Puppies Bred In-House', mode: 'new', changes: [{ h: 'Dam Microchip', k: 0, v: '999000000000103', kind: 'chip' }, { h: 'Litter DOB', k: 0, v: '2026-10-15', kind: 'date' }, { h: 'No. of Puppies', k: 0, v: '2', kind: 'number' }, { h: 'Sex Breakdown', k: 0, v: '1 M, 1 F', kind: 'long' }] },
+    pup('M', 'APRICOT'), pup('F', 'CREAM'),
+    { tab: 'Mating Records', mode: 'edit', row: 2, changes: [{ h: 'Successful', k: 0, v: 'Yes', kind: 'text' }], expect: [{ h: 'Successful', k: 0, v: '', kind: 'text' }] },
+  ] });
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.results.map(r => r.id), [null, 'A010', 'A011', undefined]);
+  assert.equal(ab.peek(5, 1).v, 'A010');
+  assert.equal(ab.peek(6, 1).v, 'A011');
+  assert.ok(ab.peek(6, 8).f, 'Age formula on every new puppy row');
+  assert.equal(lit.peek(2, 10).v, 2);
+  assert.equal(mat.peek(2, 8).v, 'Yes');
+});
+
+test('dates typed as text and long numbers are not mangled', () => {
+  const { ss, vac } = fixture();
+  const b = loadBridge(ss);
+  b.post({ action: 'save', tab: 'Vaccinations', mode: 'new', changes: [
+    { h: 'Microchip No.', k: 0, v: '999000000000101', kind: 'chip' }, { h: 'Batch No.', k: 0, v: '10/04', kind: 'text' },
+    { h: 'Certificate No.', k: 0, v: '000123', kind: 'text' }, { h: 'Date Given', k: 0, v: '2026-10-17', kind: 'date' }] });
+  assert.equal(vac.peek(3, 5).v, '10/04');
+  assert.equal(vac.peek(3, 10).v, '000123');
+});
+
+test('new rows grow the sheet when it is full', () => {
+  const { ss, vac } = fixture();
+  vac.maxRows = 2;
+  const b = loadBridge(ss);
+  const res = b.post({ action: 'save', tab: 'Vaccinations', mode: 'new', changes: [{ h: 'Microchip No.', k: 0, v: '999000000000101', kind: 'chip' }] });
+  assert.equal(res.ok, true);
+  assert.equal(res.row, 3);
+  assert.ok(vac.maxRows > 3);
+});
+
+test('settings are cleaned, saved, and control the reminder trigger', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  const on = b.post({ action: 'settings_set', who: 'Austin', settings: { checks: { licence: false }, breeding: { maxLittersPer12Months: '2', retireAgeYears: 'abc' }, reminders: { enabled: true, hour: 7, extra: 'a@b.co, not-an-email' } } });
+  assert.equal(on.ok, true);
+  assert.equal(on.settings.checks.licence, false);
+  assert.equal(on.settings.checks.healthcheck, true);
+  assert.equal(on.settings.breeding.maxLittersPer12Months, 2);
+  assert.equal(on.settings.breeding.retireAgeYears, null);
+  assert.equal(on.settings.reminders.extra, 'a@b.co');
+  assert.equal(b.triggers.length, 1);
+  assert.equal(b.triggers[0].spec.hour, 7);
+  assert.equal(b.triggers[0].spec.tz, TZ);
+  const off = b.post({ action: 'settings_set', settings: { reminders: { enabled: false } } });
+  assert.equal(off.ok, true);
+  assert.equal(b.triggers.length, 0);
+  const r = b.post({ action: 'read', tabs: [] });
+  assert.equal(r.settings.checks.licence, false, 'settings persist between calls');
+});
+
+test('the daily email lists overdue and upcoming items and skips litters already born', () => {
+  const { ss, lit } = fixture();
+  const b = loadBridge(ss);
+  const d = b.ctx.digestItems_(ss, b.ctx.getSettings_());
+  assert.equal(d.overdue.length, 1);
+  assert.equal(d.overdue[0].what, 'Vaccination');
+  assert.match(d.overdue[0].who, /Biscuit/);
+  assert.equal(d.soon.length, 1);
+  assert.equal(d.soon[0].what, 'Expected whelping');
+  lit.getRange(2, 1, 1, 7).setValues([['999000000000103', '', '', '', '', '', D(addDays(today(), -1))]]);
+  const d2 = b.ctx.digestItems_(ss, b.ctx.getSettings_());
+  assert.equal(d2.soon.length, 0, 'no whelping reminder once the litter is recorded');
+  const t = b.post({ action: 'digest_test' });
+  assert.equal(t.ok, true);
+  assert.deepEqual(t.to, ['owner@example.com']);
+  assert.match(b.mail[0].subject, /1 overdue/);
+});
+
+test('photos upload into Drive, are indexed, and only indexed files can be fetched', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  const data = Buffer.from('fake-jpeg-bytes').toString('base64');
+  const up = b.post({ action: 'photo_upload', dogKey: '999000000000101', dogName: 'Biscuit', mime: 'image/jpeg', data, who: 'Austin' });
+  assert.equal(up.ok, true);
+  const r = b.post({ action: 'read', tabs: ['All Breeds'] });
+  assert.equal(r.photos['999000000000101'].id, up.id);
+  assert.equal(r.tabs['App Photos'], undefined, 'the photo index is not sent as a tab');
+  const got = b.post({ action: 'photo_get', id: up.id });
+  assert.equal(got.ok, true);
+  assert.equal(Buffer.from(got.data, 'base64').toString(), 'fake-jpeg-bytes');
+  assert.equal(b.post({ action: 'photo_get', id: 'someone-elses-file' }).ok, false);
+  assert.equal(b.post({ action: 'photo_upload', dogKey: '../etc', mime: 'image/jpeg', data }).ok, false);
+  const again = b.post({ action: 'photo_upload', dogKey: '999000000000101', mime: 'image/jpeg', data });
+  const r2 = b.post({ action: 'read', tabs: [] });
+  assert.equal(r2.photos['999000000000101'].id, again.id, 'a new photo replaces the old one in the index');
+  assert.equal(ss.getSheetByName('App Photos').getLastRow(), 2);
+});
+
+test('the change log read is limited to the latest rows', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  const log = b.ctx.ensureChangeTab_(ss);
+  const rows = [];
+  for (let i = 0; i < 450; i++) rows.push(['2026-10-17 10:00', 'Austin', 'Edited', 'Kennels', i, '', 'Type', 'a', 'b' + i]);
+  log.getRange(2, 1, rows.length, 9).setValues(rows);
+  const r = b.post({ action: 'read', tabs: ['App Change Log'] });
+  const t = r.tabs['App Change Log'];
+  assert.equal(t.rows.length, 400);
+  assert.equal(t.rows[t.rows.length - 1].v[8], 'b449');
+  assert.equal(t.rows[0].r, 52);
+});
+
+test('a script copied without a sheet ID explains how to fix it', () => {
+  const { ss } = fixture();
+  const fs = require('fs');
+  const path = require('path');
+  const vm = require('vm');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'K9AppBridge.gs'), 'utf8');
+  const ctx = { PropertiesService: { getScriptProperties: () => ({ getProperty: () => 'k'.repeat(40) }) }, ContentService: { MimeType: {}, createTextOutput: s => ({ setMimeType() { return this; }, getContent: () => s }) }, SpreadsheetApp: { openById: () => ss }, JSON, String, Object, Array, Number, Math };
+  vm.createContext(ctx);
+  vm.runInContext(src, ctx);
+  const res = JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ key: 'k'.repeat(40), action: 'ping' }) } }).getContent());
+  assert.equal(res.ok, false);
+  assert.match(res.message, /Copy the script again/);
+});
+
+/* ───── regression tests for the independent review ───── */
+
+test('a retried save with the same ID returns the first result instead of saving twice', () => {
+  const { ss, vac } = fixture();
+  const b = loadBridge(ss);
+  const body = { action: 'batch', opId: 'op-1', opHash: 'h1', ops: [{ tab: 'Vaccinations', mode: 'new', changes: [{ h: 'Microchip No.', k: 0, v: '999000000000101', kind: 'chip' }] }] };
+  const first = b.post(body);
+  const again = b.post(body);
+  assert.equal(first.ok, true);
+  assert.equal(again.ok, true);
+  assert.equal(again.replay, true);
+  assert.deepEqual(again.results, first.results);
+  assert.equal(vac.getLastRow(), 3, 'only one new row');
+  const changed = b.post(Object.assign({}, body, { opHash: 'h2' }));
+  assert.equal(changed.error, 'changed_after_save');
+});
+
+test('an unknown column stops the whole save before anything is written', () => {
+  const { ss, vac, lit } = fixture();
+  const b = loadBridge(ss);
+  const res = b.post({ action: 'batch', ops: [
+    { tab: 'Vaccinations', mode: 'new', changes: [{ h: 'Microchip No.', k: 0, v: '999000000000101', kind: 'chip' }] },
+    { tab: 'Puppies Bred In-House', mode: 'new', changes: [{ h: 'Litter D.O.B.', k: 0, v: '2026-10-01', kind: 'date' }] },
+  ] });
+  assert.equal(res.error, 'no_column');
+  assert.match(res.message, /Litter D\.O\.B\./);
+  assert.equal(vac.getLastRow(), 2);
+  assert.equal(lit.getLastRow(), 1);
+});
+
+test('the app’s own log and photo tabs can’t be written through the bridge', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  b.ctx.ensureChangeTab_(ss);
+  const res = b.post({ action: 'save', tab: 'App Change Log', mode: 'new', changes: [{ h: 'Person', k: 0, v: 'x', kind: 'text' }] });
+  assert.equal(res.error, 'protected');
+  assert.equal(b.post({ action: 'save', tab: 'App Photos', mode: 'new', changes: [] }).error, 'protected');
+});
+
+test('a dropdown that would refuse a value is caught before anything is written', () => {
+  const { ss, ab } = fixture();
+  ab.cell(5, 12).rule = { type: 'VALUE_IN_LIST', values: ['Active', 'Retired'], allowInvalid: false };
+  const b = loadBridge(ss);
+  const res = b.post({ action: 'batch', ops: [
+    { tab: 'All Breeds', mode: 'edit', row: 2, changes: [{ h: 'Remarks', k: 0, v: 'ok', kind: 'long' }], expect: [] },
+    { tab: 'All Breeds', mode: 'new', changes: [{ h: 'Microchip No.', k: 0, v: '999000000000150', kind: 'chip' }, { h: 'Status', k: 0, v: 'Sold', kind: 'status' }] },
+  ] });
+  assert.equal(res.error, 'invalid');
+  assert.match(res.message, /only accepts: Active, Retired/);
+  assert.equal(ab.peek(2, 13).v, undefined, 'the edit was not written either');
+  assert.equal(ab.getLastRow(), 4);
+});
+
+test('if Sheets refuses part of a save, everything already written is put back', () => {
+  const { ss, ab, lit } = fixture();
+  ab.cell(6, 11).rule = { type: 'NUMBER_GREATER_THAN', values: [100], allowInvalid: false }; // a rule the bridge doesn't pre-check
+  const b = loadBridge(ss);
+  const res = b.post({ action: 'batch', ops: [
+    { tab: 'Puppies Bred In-House', mode: 'new', changes: [{ h: 'Dam Microchip', k: 0, v: '999000000000103', kind: 'chip' }, { h: 'Litter DOB', k: 0, v: '2026-10-15', kind: 'date' }] },
+    { tab: 'All Breeds', mode: 'edit', row: 2, changes: [{ h: 'Remarks', k: 0, v: 'edited', kind: 'long' }], expect: [] },
+    { tab: 'All Breeds', mode: 'new', changes: [{ h: 'Name', k: 0, v: 'Pup 1', kind: 'text' }, { h: 'Kennel No.', k: 0, v: '3', kind: 'text' }] },
+    { tab: 'All Breeds', mode: 'new', changes: [{ h: 'Name', k: 0, v: 'Pup 2', kind: 'text' }, { h: 'Kennel No.', k: 0, v: '3', kind: 'text' }] },
+  ] });
+  assert.equal(res.ok, false);
+  assert.equal(res.error, 'refused');
+  assert.equal(res.rolledBack, true);
+  assert.equal(ab.peek(2, 13).v === undefined || ab.peek(2, 13).v === '', true, 'the edit was undone');
+  assert.ok(!ab.peek(5, 3).v, 'no puppies were left behind');
+  assert.ok(!lit.peek(2, 1).v, 'the litter row was undone');
+  assert.equal(ss.getSheetByName('App Change Log'), null, 'nothing was logged as saved');
+});
+
+test('a stray formula in a data column is not copied into new rows, and the value is still saved', () => {
+  const { ss, vac } = fixture();
+  vac.cell(2, 10).f = '=HYPERLINK("https://example.com","C-1")';
+  const b = loadBridge(ss);
+  const res = b.post({ action: 'save', tab: 'Vaccinations', mode: 'new', changes: [{ h: 'Microchip No.', k: 0, v: '999000000000101', kind: 'chip' }, { h: 'Certificate No.', k: 0, v: 'C-99', kind: 'text' }] });
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.skipped, []);
+  assert.equal(vac.peek(3, 10).v, 'C-99');
+  assert.equal(vac.peek(3, 10).f, undefined);
+});
+
+test('formulas already filled into empty rows are kept, and array-formula columns are never written', () => {
+  const { ss, ab } = fixture();
+  for (let r = 5; r <= 30; r++) { ab.cell(r, 8).f = '=IF(R[0]C[-1]="","",1)'; ab.cell(r, 8).v = ''; }
+  ab.cell(1, 21).v = 'Age band';
+  ab.cell(2, 21).f = '=ARRAYFORMULA(IF(G2:G="","",1))';
+  for (let r = 2; r <= 40; r++) ab.cell(r, 21).v = r < 5 ? 1 : '';
+  const b = loadBridge(ss);
+  const res = b.post({ action: 'save', tab: 'All Breeds', mode: 'new', changes: [{ h: 'Name', k: 0, v: 'Pip', kind: 'text' }, { h: 'Age band', k: 0, v: '9', kind: 'text' }] });
+  assert.equal(res.ok, true);
+  assert.equal(res.row, 5, 'the new dog goes straight after the last real dog');
+  assert.equal(ab.peek(5, 8).f, '=IF(R[0]C[-1]="","",1)', 'the pre-filled formula stays');
+  assert.deepEqual(res.skipped, ['Age band']);
+  assert.ok(!ab.log.some(([op, a1]) => op === 'setValues' && /U\d/.test(a1)), 'nothing written into the array column');
+});
+
+test('rows of unticked tick boxes don’t push new rows to the bottom', () => {
+  const { ss, vac } = fixture();
+  for (let r = 3; r <= 60; r++) vac.cell(r, 11).v = false;
+  const b = loadBridge(ss);
+  const res = b.post({ action: 'save', tab: 'Vaccinations', mode: 'new', changes: [{ h: 'Microchip No.', k: 0, v: '999000000000101', kind: 'chip' }] });
+  assert.equal(res.row, 3);
+  const r = b.post({ action: 'read', tabs: ['Vaccinations'] });
+  assert.equal(r.tabs.Vaccinations.rows.length, 2);
+});
+
+test('the change log records dates in the sheet’s time zone', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  b.post({ action: 'save', tab: 'All Breeds', mode: 'new', changes: [{ h: 'Name', k: 0, v: 'Pip', kind: 'text' }, { h: 'Date of Birth', k: 0, v: '2026-06-01', kind: 'date' }] });
+  assert.match(String(ss.getSheetByName('App Change Log').peek(2, 9).v), /Date of Birth: 2026-06-01/);
+});
+
+test('text in plain-text cells is saved exactly, with no apostrophe added', () => {
+  const { ss, vac } = fixture();
+  vac.cell(3, 10).fmt = '@';
+  const b = loadBridge(ss);
+  b.post({ action: 'save', tab: 'Vaccinations', mode: 'new', changes: [{ h: 'Microchip No.', k: 0, v: '999000000000101', kind: 'chip' }, { h: 'Certificate No.', k: 0, v: '000123', kind: 'text' }] });
+  assert.equal(vac.peek(3, 10).v, '000123');
+});
+
+test('a photo is only returned if it is an image inside the photo folder', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  const data = Buffer.from('img').toString('base64');
+  b.post({ action: 'photo_upload', dogKey: '999000000000101', dogName: 'Biscuit', mime: 'image/jpeg', data });
+  b.ctx.DriveApp._addFile('secret-doc', new (require('./gas-mock').Utilities.newBlob([1], 'application/pdf', 'tax.pdf').constructor)([1], 'application/pdf', 'tax.pdf'), 'other-folder');
+  const tab = ss.getSheetByName('App Photos');
+  tab.getRange(3, 1, 1, 2).setValues([['999000000000102', 'secret-doc']]);
+  const res = b.post({ action: 'photo_get', id: 'secret-doc' });
+  assert.equal(res.ok, false);
+});

@@ -1,0 +1,63 @@
+{
+  "name": "k9-salon-manager",
+  "productName": "K-9 Salon Manager",
+  "version": "1.1.0",
+  "description": "Kennel records for K-9 Salon, synced with Google Sheets",
+  "author": "K-9 Salon",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "node scripts/build.js && electron .",
+    "build": "node scripts/build.js",
+    "check": "node scripts/build.js && node --check renderer/app.js && node --check main.js && node --check preload.js && node scripts/check-gs.js",
+    "test:unit": "node --test tests/bridge.test.js tests/scanner.test.js",
+    "test:ui": "node scripts/build.js && node --test tests/ui.test.js",
+    "test": "npm run test:unit && npm run test:ui",
+    "dist:dir": "node scripts/build.js && electron-builder --win dir --x64 --publish never",
+    "dist": "npm run dist:dir && node scripts/make-installer.js && node scripts/release-info.js"
+  },
+  "devDependencies": {
+    "@fontsource-variable/nunito-sans": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "playwright": "1.56.0",
+    "resedit": "^3.1.0"
+  },
+  "build": {
+    "appId": "sg.k9salon.manager",
+    "productName": "K-9 Salon Manager",
+    "copyright": "K-9 Salon",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "apps-script/**/*",
+      "build/icon.png"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "afterPack": "./build/afterPack.js",
+    "win": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fayraa/k9-salon-manager.git"
+  },
+  "k9": {
+    "repo": "fayraa/k9-salon-manager"
+  }
+}

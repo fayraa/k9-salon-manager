@@ -1,0 +1,9 @@
+node_modules/
+dist/
+renderer/app.js
+renderer/app.css
+renderer/index.html
+renderer/fonts.css
+build/installer.nsi
+*.log
+.DS_Store
