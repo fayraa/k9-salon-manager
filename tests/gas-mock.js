@@ -141,7 +141,7 @@ class Spreadsheet_ {
   getUrl() { return 'https://docs.google.com/spreadsheets/d/TESTID/edit'; }
   getSpreadsheetTimeZone() { return this.tz; }
   getSheets() { return this.sheets; }
-  getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
+  getSheetByName(n) { return this.sheets.find(s => s.name.toLowerCase() === String(n).toLowerCase()) || null; } // Sheets ignores capitals here
   insertSheet(n) { const s = new Sheet_(n); this.sheets.push(s); return s; }
 }
 
@@ -162,7 +162,7 @@ function loadBridge(ss, extra = {}) {
     };
   };
   const folderObj = id => ({
-    getId: () => id, isTrashed: () => folders.get(id).trashed,
+    getId: () => id, isTrashed: () => folders.get(id).trashed, setTrashed: t => { folders.get(id).trashed = !!t; },
     createFile: blob => { const fid = 'file' + (files.size + 1); blob.folder = id; files.set(fid, blob); return fileObj(fid); },
   });
   const ctx = {

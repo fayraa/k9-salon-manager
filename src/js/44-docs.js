@@ -26,10 +26,12 @@ function originOf(d) {
   const cc = CC[String(d.chip || '').slice(0, 3)];
   return isImported(d) && cc && cc !== 'Singapore' ? cc : '';
 }
-/** A dog's documents: matched by animal ID when both have one, otherwise by microchip. */
+/** A dog's documents: matched by microchip when both have one (as photos are), otherwise by animal ID. */
 function docsFor(d) {
-  return (S.docs || []).filter(x => (x.aid && d.id ? x.aid === d.id : !!(x.chip && d.chip && x.chip === d.chip)));
+  const id = String(d.id || '').trim();
+  return (S.docs || []).filter(x => (x.chip && d.chip ? x.chip === d.chip : !!(x.aid && id && String(x.aid).trim() === id)));
 }
+const docUrl = id => `https://drive.google.com/file/d/${encodeURIComponent(id)}/view`;
 const docSort = (a, b) => String(b.date || b.added).localeCompare(String(a.date || a.added));
 const docWhen = x => (x.date ? dmy(parseDate(x.date)) : '');
 
@@ -39,7 +41,8 @@ function docsSectionHTML(d) {
   const key = `data-chip="${esc(d.chip)}" data-id="${esc(d.id)}"`;
   let papers = '';
   if (isImported(d)) {
-    const have = new Map(list.map(x => [x.type, x]));
+    const have = new Map();
+    list.forEach(x => { if (!have.has(x.type)) have.set(x.type, x); }); // newest of each kind
     const from = originOf(d);
     papers = `<div class="papers"><span class="eyebrow">Import papers${from ? ` · from ${esc(from)}` : ''}</span>${IMPORT_PAPERS.map(t => { const x = have.get(t); return `<div class="check"><span class="sw ${x ? 'ok' : 'na'}" aria-hidden="true"></span><span>${esc(t)}${x ? ` <span class="muted">· on file${docWhen(x) ? ', ' + esc(docWhen(x)) : ''}</span>` : can ? ` <span class="muted">· not added yet ·</span> <button class="linkbtn" data-action="doc-add" ${key} data-type="${esc(t)}">Add<span class="sr"> ${esc(t.toLowerCase())}</span></button>` : ' <span class="muted">· not added yet</span>'}</span></div>`; }).join('')}</div>`;
   }
@@ -48,7 +51,7 @@ function docsSectionHTML(d) {
     const sub = [docWhen(x), x.country, x.note, L ? `with the ${L.noun}` : ''].filter(Boolean).join(' · ');
     return `<li class="doc"><span class="doc-ic" aria-hidden="true">${icon(x.mime === 'application/pdf' ? 'doc' : 'image')}</span><span class="doc-t"><b>${esc(x.type)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span>
       <button class="btn sm" data-action="doc-open" data-doc="${esc(x.id)}">Open<span class="sr"> ${esc(x.type.toLowerCase())}</span></button>
-      <a class="iconbtn" href="https://drive.google.com/file/d/${encodeURIComponent(x.id)}/view" target="_blank" rel="noopener" aria-label="Open ${esc(x.type.toLowerCase())} in Google Drive" title="Open in Google Drive">${icon('ext')}</a>
+      <a class="iconbtn" href="${docUrl(x.id)}" target="_blank" rel="noopener" aria-label="Open ${esc(x.type.toLowerCase())} in Google Drive" title="Open in Google Drive">${icon('ext')}</a>
       ${can ? `<button class="iconbtn" data-action="doc-remove" data-doc="${esc(x.id)}" aria-label="Remove ${esc(x.type.toLowerCase())}" title="Remove">${icon('x')}</button>` : ''}</li>`;
   }).join('');
   return `<section class="sec" aria-labelledby="dr-docs"><h3 id="dr-docs">Documents · ${list.length}</h3>
@@ -87,14 +90,17 @@ function openDocAdd(chip, id, type) {
   o.docDog = { chip: d.chip, id: d.id };
   o.files = [];
   o.linkTouched = false;
+  o.linkSeen = new Map();
   const form = $('form', o.el);
   const sync = () => {
     const k = kindOfDoc($('#dc-type', o.el).value);
     $('#dc-country-f', o.el).hidden = !k.country;
-    const evs = k.tab && S.db[k.tab] && d.chip ? evsFor(d.chip, k.tab) : [];
+    const evs = k.tab && S.db[k.tab] && d.chip ? evsFor(d.chip, k.tab).slice(0, 50) : [];
     const sel = $('#dc-link', o.el);
     const want = sel.value;
-    sel.innerHTML = `<option value="">No particular record</option>${evs.slice(0, 50).map(e => `<option value="${esc(e.L.tab)}|${e.row.r}">${esc([e.date ? dmy(e.date) : 'No date', eventSummary(e)].filter(Boolean).join(' · ').slice(0, 90))}</option>`).join('')}`;
+    // each record as shown now, so the bridge can refuse the link if that row changes before saving
+    evs.forEach(e => { const v = `${e.L.tab}|${e.row.r}`; if (!o.linkSeen.has(v)) o.linkSeen.set(v, rowExpect(e.t, e.row)); });
+    sel.innerHTML = `<option value="">No particular record</option>${evs.map(e => `<option value="${esc(e.L.tab)}|${e.row.r}">${esc([e.date ? dmy(e.date) : 'No date', eventSummary(e)].filter(Boolean).join(' · ').slice(0, 90))}</option>`).join('')}`;
     if (want && Array.from(sel.options).some(x => x.value === want)) sel.value = want;
     $('#dc-link-f', o.el).hidden = !evs.length;
     o.linkEvents = evs;
@@ -158,6 +164,7 @@ async function submitDoc(o) {
   const type = $('#dc-type', o.el).value, k = kindOfDoc(type);
   if (!o.files.length) { say('Choose a PDF or photos to add.', true); $('#dc-file', o.el).focus(); return; }
   o.job.saving = true; btn.disabled = true; btn.textContent = 'Saving…';
+  let again = false;
   try {
     if (!o.prepared) {
       // the file is prepared once, so pressing Save again sends exactly the same thing
@@ -185,26 +192,44 @@ async function submitDoc(o) {
     const payload = {
       action: 'doc_upload', aid: d.id || '', chip: d.chip || '', dog: dogLabel(d), type,
       date: $('#dc-date', o.el).value || '', country: k.country ? $('#dc-country', o.el).value.trim() : '', note: $('#dc-note', o.el).value.trim(),
-      mime: o.prepared.mime, data: o.prepared.data, link: link ? { tab: link.split('|')[0], row: +link.split('|')[1] } : null,
+      mime: o.prepared.mime, data: o.prepared.data,
+      link: link && o.linkSeen.has(link) ? { tab: link.split('|')[0], row: +link.split('|')[1], expect: o.linkSeen.get(link) } : null,
     };
     say(`Uploading ${fileSize(Math.round(o.prepared.data.length * 0.75))}… This can take a minute.`);
     if (!o.opId) o.opId = newOpId();
     let res;
     try { res = await sendWrite(payload, o.opId); o.opId = null; }
-    catch (e) { if (!e.keepOp) o.opId = null; btn.textContent = e.keepOp ? 'Save again' : 'Save document'; throw e; }
+    catch (e) {
+      if (e.code === 'changed_after_save') {
+        // the first press did save it: don't offer to save a second copy
+        o.job.saving = false; closeTop(true);
+        toast('This document was already saved a moment ago. The list is reloading.');
+        scheduleRefresh(300);
+        return;
+      }
+      if (!(e.keepOp || e.code === 'locked')) o.opId = null; // same ID on the next press, so it can't be filed twice
+      again = !!o.opId;
+      if (e.refresh) scheduleRefresh(800);
+      throw e;
+    }
     o.job.saving = false;
-    if (!res.replay || !S.docs.some(x => x.id === res.doc.id)) S.docs.push(res.doc);
+    if (!S.docs.some(x => x.id === res.doc.id)) S.docs.push(res.doc);
     closeTop(true);
     const L = res.doc.tab && LOG[res.doc.tab];
-    toast(res.linkWritten && L ? `Document saved and linked to the ${L.noun} in the sheet` : `${type} saved for ${dogName(d)}`);
+    toast(res.linkSkipped === 'changed' ? `Document saved. It wasn’t linked: that record changed in the sheet while you were adding it.`
+      : res.linkWritten && L ? `Document saved and linked to the ${L.noun} in the sheet`
+      : `${type} saved for ${dogName(d)}`, res.linkSkipped === 'changed');
     rebuild(); renderAll();
+    focusDocs();
     scheduleRefresh(1500);
   } catch (e) {
-    o.job.saving = false; btn.disabled = false;
-    if (btn.textContent === 'Saving…') btn.textContent = 'Save document';
+    o.job.saving = false;
+    btn.textContent = again ? 'Save again' : 'Save document';
     say(e.userMessage || e.message || 'Couldn’t save the document.', true);
   } finally { btn.disabled = false; }
 }
+/** After the profile is redrawn, put keyboard focus back in the Documents section. */
+function focusDocs() { setTimeout(() => { const b = $('.drawer [data-action="doc-add"]:not([data-type])') || $('.drawer #dr-docs'); if (b) { if (!b.matches('button')) b.tabIndex = -1; b.focus(); } }, 180); }
 
 /* opening and removing */
 async function openDocFile(id, btn) {
@@ -235,6 +260,7 @@ async function removeDoc(id, btn) {
     closeTop(true);
     toast('Document removed');
     rebuild(); renderAll();
+    focusDocs();
   } catch (e) {
     btn.disabled = false;
     if (msg) { msg.textContent = e.userMessage || 'Couldn’t remove it.'; msg.className = 'msg err'; }

@@ -38,6 +38,7 @@ function stub(opts) {
         if (p.action === 'batch') { let n = 200, id = 22; return { ok: true, results: p.ops.map(op => ({ row: op.mode === 'new' ? n++ : op.row, id: op.tab === 'All Breeds' && op.mode === 'new' ? 'T0' + (id++) : null })) }; }
         if (p.action === 'settings_set') return { ok: true, settings: Object.assign({}, O.read.settings, p.settings), reminders: { installed: !!(p.settings.reminders && p.settings.reminders.enabled) } };
         if (p.action === 'digest_test') return { ok: true, to: ['owner@example.com'] };
+        if (S.docFail && p.action === 'doc_upload') { const e = S.docFail.shift(); if (!S.docFail.length) S.docFail = null; return Object.assign({ ok: false }, e); }
         if (p.action === 'doc_upload') { S.docN = (S.docN || 0) + 1; const id = 'doc-new-000' + S.docN; return { ok: true, doc: { id, aid: p.aid, chip: p.chip, dog: p.dog, type: p.type, date: p.date, country: p.country, note: p.note, name: p.type + '.pdf', mime: p.mime, tab: p.link ? p.link.tab : '', row: p.link ? p.link.row : null, added: '2026-10-17 10:00', by: p.who }, linkWritten: !!p.link }; }
         if (p.action === 'doc_remove') return { ok: true };
         return { ok: false, error: 'bad_action' };
@@ -52,6 +53,7 @@ function stub(opts) {
       imagesPdf: async urls => { S.combined = urls.length; S.combinedOk = urls.every(u => u.startsWith('data:image/jpeg;base64,')); return { ok: true, data: btoa('%PDF-1.4 combined test') }; },
       docOpen: async x => { (S.opened = S.opened || []).push(x.id); return { ok: true }; },
       docForget: async id => { (S.forgot = S.forgot || []).push(id); return true; },
+      docPrune: async keep => { S.pruneKeep = keep; return 0; },
       getUpdateState: async () => ({ state: 'idle' }),
       updateCheck: async () => true,
       updateInstall: async () => ({ ok: true }),
@@ -782,7 +784,10 @@ test('documents: a PDF is added to a dog and linked to its vaccination record', 
   const up = (await calls()).find(c => c.action === 'doc_upload');
   assert.deepEqual([up.aid, up.chip, up.type, up.date, up.mime, up.note, up.country], ['T001', chip(0), 'Vaccination record', ago(360), 'application/pdf', 'Booster 2', '']);
   assert.equal(Buffer.from(up.data, 'base64').toString(), '%PDF-1.4\n%test\n', 'the PDF is sent as it is');
-  assert.deepEqual(up.link, { tab: 'Vaccinations', row: 2 });
+  assert.deepEqual([up.link.tab, up.link.row], ['Vaccinations', 2]);
+  const seen = Object.fromEntries(up.link.expect.map(x => [x.h, x.v]));
+  assert.equal(seen['Microchip No.'], chip(0), 'the record is sent as it was shown, so a moved row is never linked');
+  assert.equal(seen['Vaccine Type'], 'DHPPi');
   assert.match(up.dog, /Biscuit \(T001\)/);
   assert.ok(up.opId && up.opHash, 'a retry can’t file it twice');
   await page.waitForSelector('.toast');
@@ -857,6 +862,41 @@ test('documents need the newest bridge, and the import papers check flags import
   await page.click('#dog-table tbody tr');
   await page.waitForSelector('.drawer');
   assert.match(await page.textContent('#dr-todo + .checks'), /Import papers not on file: export health certificate, overseas vaccination record/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('documents: an unconfirmed upload is sent again with the same ID, and one already saved isn’t saved twice', async () => {
+  const { page, errors, ctx, calls } = await openApp({ version: 4 });
+  await openDogDrawer(page, 'Pepper');
+  await page.click('.drawer [data-action="doc-add"]');
+  await page.waitForSelector('#dc-type');
+  await page.selectOption('#dc-type', 'Licence');
+  await page.setInputFiles('#dc-file', { name: 'licence.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%lic\n') });
+  await page.evaluate(() => { window.__k9.docFail = [{ error: 'timeout' }, { error: 'locked' }]; });
+  await page.click('#dc-save');
+  await page.waitForFunction(() => /won’t be saved twice/.test(document.querySelector('#dc-msg').textContent));
+  assert.equal(await page.textContent('#dc-save'), 'Save again');
+  await page.click('#dc-save');
+  await page.waitForFunction(() => /Another save/.test(document.querySelector('#dc-msg').textContent));
+  assert.equal(await page.textContent('#dc-save'), 'Save again', 'a busy bridge keeps the same ID too');
+  await page.click('#dc-save');
+  await page.waitForSelector('.toast');
+  const ups = (await calls()).filter(c => c.action === 'doc_upload');
+  assert.equal(ups.length, 3);
+  assert.ok(ups.every(u => u.opId === ups[0].opId && u.opHash === ups[0].opHash), 'the same file with the same ID each time');
+  await page.waitForFunction(() => document.activeElement && document.activeElement.matches('.drawer [data-action="doc-add"]'));
+
+  await page.click('.drawer [data-action="doc-add"]');
+  await page.waitForSelector('#dc-type');
+  await page.setInputFiles('#dc-file', { name: 'b.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%b\n') });
+  await page.evaluate(() => { window.__k9.docFail = [{ error: 'timeout' }, { error: 'changed_after_save' }]; });
+  await page.click('#dc-save');
+  await page.waitForFunction(() => /won’t be saved twice/.test(document.querySelector('#dc-msg').textContent));
+  await page.fill('#dc-note', 'changed my mind'); // a different request now, but the first one did go through
+  await page.click('#dc-save');
+  await page.waitForFunction(() => !document.querySelector('#dc-type'));
+  assert.match(await page.textContent('.toasts'), /already saved a moment ago/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

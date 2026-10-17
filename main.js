@@ -209,7 +209,7 @@ ipcMain.handle('k9:doc-open', async (event, input) => {
   if (!/^[\w-]{6,120}$/.test(id)) return { ok: false };
   const dir = docDir(id);
   let file = null;
-  try { const names = await fsp.readdir(dir); if (names[0]) file = path.join(dir, names[0]); } catch (e) { /* not kept yet */ }
+  try { const name = (await fsp.readdir(dir)).find(n => !n.endsWith('.part')); if (name) file = path.join(dir, name); } catch (e) { /* not kept yet */ }
   if (!file) {
     const s = readSettings();
     const res = await postToBridge(s.url, s.key, { action: 'doc_get', id });
@@ -218,10 +218,25 @@ ipcMain.handle('k9:doc-open', async (event, input) => {
     const name = (safeName(res.name || (input && input.name)) || 'Document').replace(/\.[a-z0-9]{2,4}$/i, '') + '.' + ext;
     await fsp.mkdir(dir, { recursive: true });
     file = path.join(dir, name);
-    await fsp.writeFile(file, Buffer.from(res.data, 'base64'));
+    // written under a temporary name first, so a copy cut off half-way is never opened
+    await fsp.writeFile(file + '.part', Buffer.from(res.data, 'base64'));
+    await fsp.rename(file + '.part', file);
   }
   const err = await shell.openPath(file);
   return err ? { ok: false, message: err } : { ok: true };
+});
+// Removes copies of documents that are no longer on the list (removed on this or another computer).
+ipcMain.handle('k9:doc-prune', async (event, keep) => {
+  if (!Array.isArray(keep)) return 0;
+  const ids = new Set(keep.map(String));
+  const root = path.join(app.getPath('userData'), 'documents');
+  let n = 0;
+  for (const id of await fsp.readdir(root).catch(() => [])) {
+    if (!/^[\w-]{6,120}$/.test(id) || ids.has(id)) continue;
+    await fsp.rm(path.join(root, id), { recursive: true, force: true }).catch(() => {});
+    n++;
+  }
+  return n;
 });
 ipcMain.handle('k9:doc-forget', async (event, id) => {
   id = String(id || '');

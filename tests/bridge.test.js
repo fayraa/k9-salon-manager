@@ -493,13 +493,15 @@ test('dropdown items saved with stray spaces are matched the same way the app is
 
 const PDF = Buffer.from('%PDF-1.4\n% test\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n').toString('base64');
 const JPG = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0, 16, 74, 70, 73, 70, 0, 1]).toString('base64');
+const VAC_SEEN = [{ h: 'Microchip No.', k: 0, v: '999000000000101', kind: 'chip' }, { h: 'Date Given', k: 0, v: '2025-10-10', kind: 'date' }, { h: 'Vaccine Type', k: 0, v: 'DHPPi', kind: 'text' }];
+const vacLink = (extra) => Object.assign({ tab: 'Vaccinations', row: 2, expect: VAC_SEEN }, extra);
 const docReq = extra => Object.assign({ action: 'doc_upload', who: 'Austin', aid: 'A001', chip: '999000000000101', dog: 'Biscuit (A001)', type: 'Vaccination record', date: '2025-10-10', country: '', note: 'Booster', mime: 'application/pdf', data: PDF }, extra);
 
 test('documents: a PDF is filed in Drive, listed, linked to the dog’s record and logged, and a retry files it once', () => {
   const { ss, vac } = fixture();
   vac.cell(1, 12).v = 'Certificate PDF Link';
   const b = loadBridge(ss);
-  const res = b.post(docReq({ link: { tab: 'Vaccinations', row: 2 }, opId: 'doc-1', opHash: 'h1' }));
+  const res = b.post(docReq({ link: vacLink(), opId: 'doc-1', opHash: 'h1' }));
   assert.equal(res.ok, true);
   assert.equal(res.linkWritten, true);
   const f = b.files.get(res.doc.id);
@@ -516,7 +518,7 @@ test('documents: a PDF is filed in Drive, listed, linked to the dog’s record a
   assert.deepEqual([docs[0].type, docs[0].date, docs[0].note, docs[0].tab, docs[0].row, docs[0].by], ['Vaccination record', '2025-10-10', 'Booster', 'Vaccinations', 2, 'Austin']);
   const log = ss.getSheetByName('App Change Log');
   assert.deepEqual([log.peek(2, 3).v, log.peek(3, 3).v, log.peek(3, 7).v], ['Document', 'Edited', 'Certificate PDF Link']);
-  const again = b.post(docReq({ link: { tab: 'Vaccinations', row: 2 }, opId: 'doc-1', opHash: 'h1' }));
+  const again = b.post(docReq({ link: vacLink(), opId: 'doc-1', opHash: 'h1' }));
   assert.equal(again.replay, true);
   assert.equal(again.doc.id, res.doc.id);
   assert.equal(b.files.size, 1, 'pressing Save again doesn’t file it twice');
@@ -536,12 +538,12 @@ test('documents: wrong or oversized files are refused, and only the dog’s own 
   assert.match(b.post(docReq({ aid: '', chip: '' })).message, /no animal ID or microchip/);
   assert.match(b.post(docReq({ type: ' ' })).message, /what kind of document/);
   assert.equal(b.files.size, 0, 'nothing was filed');
-  const other = b.post(docReq({ aid: 'A002', chip: '999000000000102', dog: 'Pepper (A002)', link: { tab: 'Vaccinations', row: 2 } }));
+  const other = b.post(docReq({ aid: 'A002', chip: '999000000000102', dog: 'Pepper (A002)', link: vacLink() }));
   assert.equal(other.ok, true);
   assert.equal(other.doc.tab, '', 'Biscuit’s vaccination isn’t linked to Pepper’s document');
   assert.equal(vac.peek(2, 12).v, undefined);
   vac.cell(2, 12).v = 'https://example.com/scan';
-  const kept = b.post(docReq({ type: 'Vaccination record', mime: 'image/jpeg', data: JPG, link: { tab: 'Vaccinations', row: 2 } }));
+  const kept = b.post(docReq({ type: 'Vaccination record', mime: 'image/jpeg', data: JPG, link: vacLink() }));
   assert.equal(kept.ok, true);
   assert.equal(kept.doc.tab, 'Vaccinations');
   assert.equal(kept.linkWritten, false);
@@ -555,7 +557,7 @@ test('documents: removing one moves it to the Drive bin, clears the link it wrot
   const { ss, vac } = fixture();
   vac.cell(1, 12).v = 'Certificate PDF Link';
   const b = loadBridge(ss);
-  const res = b.post(docReq({ link: { tab: 'Vaccinations', row: 2 } }));
+  const res = b.post(docReq({ link: vacLink() }));
   const keep = b.post(docReq({ type: 'Import permit' }));
   const gone = b.post({ action: 'doc_remove', id: res.doc.id, who: 'Austin' });
   assert.equal(gone.ok, true);
@@ -580,4 +582,74 @@ test('the import papers check is off by default and can be turned on', () => {
   assert.equal(b.post({ action: 'read', tabs: [] }).settings.checks.papers, false);
   assert.equal(b.post({ action: 'settings_set', settings: { checks: { papers: true } } }).settings.checks.papers, true);
   assert.equal(b.post({ action: 'read', tabs: [] }).settings.checks.papers, true);
+});
+
+test('documents: a record that changed or moved meanwhile isn’t linked, and removal finds the link wherever it went', () => {
+  const { ss, vac } = fixture();
+  vac.cell(1, 12).v = 'Certificate PDF Link';
+  const b = loadBridge(ss);
+  const stale = b.post(docReq({ link: vacLink({ expect: [{ h: 'Date Given', k: 0, v: '2025-01-05', kind: 'date' }] }) }));
+  assert.equal(stale.ok, true, 'the document is still filed');
+  assert.equal(stale.doc.tab, '');
+  assert.equal(stale.linkSkipped, 'changed');
+  assert.equal(vac.peek(2, 12).v, undefined, 'nothing written into a record the app didn’t show');
+  const none = b.post(docReq({ link: vacLink({ expect: [] }) }));
+  assert.equal(none.doc.tab, '', 'a link without the record’s details is not made');
+  const ok = b.post(docReq({ link: vacLink() }));
+  const url = `https://drive.google.com/file/d/${ok.doc.id}/view`;
+  assert.equal(vac.peek(2, 12).v, url);
+  vac.cell(3, 12).v = url; delete vac.cell(2, 12).v; // the tab was sorted
+  assert.equal(b.post({ action: 'doc_remove', id: ok.doc.id }).ok, true);
+  assert.equal(vac.peek(3, 12).v, undefined, 'the link is cleared where it is now');
+});
+
+test('documents: link columns filled by a formula are left alone, and with several link columns the fitting one is used', () => {
+  const { ss, vac } = fixture();
+  vac.cell(1, 12).v = 'Certificate PDF Link';
+  vac.cell(2, 12).f = '=ARRAYFORMULA(IF(A2:A="","",""))';
+  const b = loadBridge(ss);
+  const a = b.post(docReq({ link: vacLink() }));
+  assert.equal(a.doc.tab, 'Vaccinations', 'still linked in the list');
+  assert.equal(a.linkWritten, false, 'an array formula column is never written');
+  delete vac.cell(2, 12).f; delete vac.cell(2, 12).v;
+  vac.cell(1, 12).v = 'Invoice Link';
+  vac.cell(1, 13).v = 'Certificate Link';
+  const plain = b.post(docReq({ type: 'Vaccination record', link: vacLink() }));
+  assert.equal(plain.linkWritten, false, 'two link columns and no clear fit: neither is written');
+  const cert = b.post(docReq({ type: 'Health certificate', link: vacLink() }));
+  assert.equal(cert.linkWritten, true);
+  assert.equal(vac.peek(2, 13).v, `https://drive.google.com/file/d/${cert.doc.id}/view`);
+  assert.equal(vac.peek(2, 12).v, undefined);
+});
+
+test('documents: a folder moved to the bin by hand is restored, and older documents still open', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  const first = b.post(docReq({}));
+  const folder = b.props.get('DOC_FOLDER_ID');
+  b.folders.get(folder).trashed = true;
+  const second = b.post(docReq({ type: 'Import permit' }));
+  assert.equal(second.ok, true);
+  assert.equal(b.props.get('DOC_FOLDER_ID'), folder, 'the same folder is used');
+  assert.equal(b.folders.get(folder).trashed, false, 'and taken out of the bin');
+  assert.equal(b.post({ action: 'doc_get', id: first.doc.id }).ok, true);
+});
+
+test('documents: unusual animal IDs, picture checks, capitals in tab names and a damaged list', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  assert.equal(b.post(docReq({ aid: 'SG/23/01' })).doc.aid, 'SG/23/01', 'any animal ID that fits is kept');
+  assert.equal(b.post(docReq({ aid: 'X'.repeat(41) })).doc.aid, '', 'a very long ID is dropped when there is a microchip');
+  assert.match(b.post(docReq({ aid: 'X'.repeat(41), chip: '' })).message, /too long/);
+  const webp = Buffer.from('RIFF\x10\x00\x00\x00WEBPVP8 ', 'binary').toString('base64');
+  const wave = Buffer.from('RIFF\x10\x00\x00\x00WAVEfmt ', 'binary').toString('base64');
+  assert.equal(b.post(docReq({ mime: 'image/webp', data: webp })).ok, true);
+  assert.match(b.post(docReq({ mime: 'image/webp', data: wave })).message, /readable picture/);
+  const write = b.post({ action: 'batch', ops: [{ tab: 'app documents', mode: 'edit', row: 2, changes: [{ h: 'Type', k: 0, v: 'x', kind: 'text' }], expect: [] }] });
+  assert.equal(write.error, 'protected', 'the list is protected whatever the capitals');
+  const idx = ss.getSheetByName('App Documents');
+  for (let r = 1; r <= idx.getLastRow(); r++) for (let c = 4; c <= 15; c++) { const x = idx.cell(r, c); delete x.v; }
+  const r = b.post({ action: 'read', tabs: ['All Breeds'] });
+  assert.equal(r.ok, true, 'a damaged list doesn’t stop the app');
+  assert.equal(r.docs.length, 3);
 });

@@ -72,6 +72,7 @@ function deskLoad() {
     if (res.settings) S.shared = mergeShared(res.settings);
     S.photos = res.photos || {};
     S.docs = Array.isArray(res.docs) ? res.docs : [];
+    if (Array.isArray(res.docs) && window.k9.docPrune) window.k9.docPrune(S.docs.map(x => x.id)).catch(() => {});
     S.reminders = res.reminders || { installed: false };
     if (!res.tabs || !res.tabs[MASTER]) { S.conn = { state: 'error', code: 'no_master', msg: 'The spreadsheet has no “All Breeds” tab. Rename the main tab back to “All Breeds”.', at: 0 }; renderAll(); return; }
     applyDb(parseBridge(res), Date.now());

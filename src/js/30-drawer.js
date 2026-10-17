@@ -46,7 +46,10 @@ function drawerHTML(d) {
   const qa = [['Vaccinations', 'Vaccination'], ['Parasite Treatments', 'Parasite treatment'], ['Daily Health Monitoring', 'Daily check'], ['Veterinary Treatments', 'Vet treatment'], ['Annual Health Checks', 'Annual check']];
   if (isF) qa.push(['Heat Cycles', 'Heat cycle'], ['Mating Records', 'Mating']);
   qa.push(['Breeding Dog Movement', 'Movement'], ['Sterilisations', 'Sterilisation'], ['Deaths', 'Death']);
-  const docRows = new Set(docsFor(d).filter(x => x.tab && x.row).map(x => `${x.tab}|${x.row}`));
+  // a record has a document when its link column holds one of the dog's documents; tabs with no link column use the row noted at upload
+  const myDocs = docsFor(d), docUrls = new Set(myDocs.map(x => docUrl(x.id)));
+  const docRows = new Set(myDocs.filter(x => x.tab && x.row).map(x => `${x.tab}|${x.row}`));
+  const hasDoc = e => e.row.v.some(v => docUrls.has(String(v).trim())) || (docRows.has(`${e.L.tab}|${e.row.r}`) && !e.t.headers.some(h => /link$/i.test(h)));
   const photo = S.photos[d.key];
   const canPhoto = S.bridgeVersion >= NEED_BRIDGE && d.key;
   return `
@@ -74,7 +77,7 @@ function drawerHTML(d) {
     <section class="sec" aria-labelledby="dr-log"><h3 id="dr-log">Log a record</h3><div class="qa">${qa.filter(([tab]) => S.db[tab]).map(([tab, l]) => `<button class="btn sm" data-action="new-entry" data-tab="${esc(tab)}" data-chip="${esc(d.chip)}">${icon('plus')}${esc(l)}</button>`).join('')}</div></section>
     <section class="sec" aria-labelledby="dr-det"><h3 id="dr-det">Details</h3><dl class="kv">${facts}</dl></section>
     ${kids.length ? `<section class="sec" aria-labelledby="dr-kids"><h3 id="dr-kids">Offspring on record · ${kids.length}</h3><div class="qa">${kids.slice(0, 40).map(k => `<button class="btn sm ghost" data-action="open-dog" data-chip="${esc(k.chip)}" data-id="${esc(k.id)}">${esc(dogName(k))}</button>`).join('')}</div></section>` : ''}
-    <section class="sec" aria-labelledby="dr-hist"><h3 id="dr-hist">History · ${tl.length}</h3>${tl.length ? `<div class="tl">${tl.slice(0, 60).map(e => `<button data-action="edit-row" data-tab="${esc(e.L.tab)}" data-r="${e.row.r}"><span class="d">${e.date ? dmy(e.date) : '—'}</span><span style="min-width:0"><b>${esc(cap(e.L.noun))}</b>${docRows.has(`${e.L.tab}|${e.row.r}`) ? `<span class="clip" title="Has a document">${icon('clip')}<span class="sr">, has a document</span></span>` : ''}<small>${esc(eventSummary(e))}</small></span></button>`).join('')}</div>` : `<p class="muted" style="margin:0">${d.chip ? 'No records for this microchip yet. Use the buttons above to log one.' : 'Add a microchip number to link records to this dog.'}</p>`}</section>
+    <section class="sec" aria-labelledby="dr-hist"><h3 id="dr-hist">History · ${tl.length}</h3>${tl.length ? `<div class="tl">${tl.slice(0, 60).map(e => `<button data-action="edit-row" data-tab="${esc(e.L.tab)}" data-r="${e.row.r}"><span class="d">${e.date ? dmy(e.date) : '—'}</span><span style="min-width:0"><b>${esc(cap(e.L.noun))}</b>${hasDoc(e) ? `<span class="clip" title="Has a document">${icon('clip')}<span class="sr">, has a document</span></span>` : ''}<small>${esc(eventSummary(e))}</small></span></button>`).join('')}</div>` : `<p class="muted" style="margin:0">${d.chip ? 'No records for this microchip yet. Use the buttons above to log one.' : 'Add a microchip number to link records to this dog.'}</p>`}</section>
   </div>`;
 }
 

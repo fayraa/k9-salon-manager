@@ -133,7 +133,7 @@ function read_(ss, wanted, limits) {
   ss.getSheets().forEach(function (sh) {
     const name = sh.getName();
     if (name === PHOTO_TAB) { photos = photoIndex_(sh); return; }
-    if (name === DOC_TAB) { docs = docIndex_(sh); return; }
+    if (name === DOC_TAB) { try { docs = docIndex_(sh); } catch (e) { docs = []; } return; } // a damaged list mustn't stop the app
     if (want && want.indexOf(name) < 0) return;
     const n = name === CHANGE_TAB ? CHANGE_LOG_LIMIT : Math.max(0, Math.min(50000, Number(lim[name]) || 0));
     tabs[name] = readTab_(sh, tz, n);
@@ -314,6 +314,7 @@ function applyOps_(ss, ops, who, opId, opHash) {
       if (PROTECTED_TABS.indexOf(String(op.tab)) >= 0) return fail('protected', i, 'The app keeps the “' + op.tab + '” tab itself, so it can’t be edited from here.');
       const t = tabCtx(op.tab);
       if (!t) return fail('no_tab', i, 'The “' + op.tab + '” tab is missing from the sheet.');
+      if (PROTECTED_TABS.indexOf(t.sh.getName()) >= 0) return fail('protected', i, 'The app keeps the “' + t.sh.getName() + '” tab itself, so it can’t be edited from here.'); // the name as Sheets found it, whatever the capitals
       const changes = op.changes || [];
       for (let j = 0; j < changes.length; j++) {
         if (colOf_(t.headers, changes[j].h, changes[j].k) < 0) return fail('no_column', i, 'The “' + op.tab + '” tab has no “' + changes[j].h + '” column. If it was renamed, rename it back, then reload the app. Nothing was saved.');
@@ -830,15 +831,31 @@ function photoGet_(ss, p) {
 
 /* ---------- documents (scans and PDFs of a dog's records) ---------- */
 
+/** The documents folder. One moved to the bin by hand is taken back out, so older documents stay reachable. */
 function docFolder_() {
   const props = PropertiesService.getScriptProperties();
   const id = props.getProperty('DOC_FOLDER_ID');
   if (id) {
-    try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) { /* make a new one */ }
+    try {
+      const f = DriveApp.getFolderById(id);
+      if (f.isTrashed()) f.setTrashed(false);
+      return f;
+    } catch (e) { /* deleted for good: make a new one */ }
   }
   const folder = DriveApp.createFolder(DOC_FOLDER);
   props.setProperty('DOC_FOLDER_ID', folder.getId());
+  const all = docFolderIds_();
+  if (all.indexOf(folder.getId()) < 0) props.setProperty('DOC_FOLDER_IDS', JSON.stringify(all.concat(folder.getId()).slice(-20)));
   return folder;
+}
+/** Every documents folder the bridge has made, so files in an older one can still be opened. */
+function docFolderIds_() {
+  const props = PropertiesService.getScriptProperties();
+  let all = [];
+  try { all = JSON.parse(props.getProperty('DOC_FOLDER_IDS') || '[]'); } catch (e) { all = []; }
+  const cur = props.getProperty('DOC_FOLDER_ID');
+  if (cur && all.indexOf(cur) < 0) all.push(cur);
+  return all;
 }
 
 function docTab_(ss) {
@@ -856,9 +873,10 @@ function docTab_(ss) {
 function docIndex_(sh) {
   const out = [];
   const last = sh.getLastRow();
-  if (last < 2) return out;
-  sh.getRange(2, 1, last - 1, DOC_HEADERS.length).getValues().forEach(function (r, i) {
-    const s = r.map(function (x) { return String(x == null ? '' : x).trim(); });
+  const cols = Math.min(DOC_HEADERS.length, sh.getLastColumn());
+  if (last < 2 || cols < 1) return out;
+  sh.getRange(2, 1, last - 1, cols).getValues().forEach(function (r, i) {
+    const s = DOC_HEADERS.map(function (h, c) { const x = r[c]; return String(x == null ? '' : x).trim(); });
     if (!s[0] || s[14]) return;
     out.push({ id: s[0], aid: s[1], chip: s[2], dog: s[3], type: s[4], date: s[5], country: s[6], note: s[7], name: s[8], mime: s[9], tab: s[10], row: Number(s[11]) || null, added: s[12], by: s[13], r: i + 2 });
   });
@@ -874,20 +892,21 @@ function docBytesOk_(bytes, mime) {
   if (mime === 'application/pdf') return b(0) === 0x25 && b(1) === 0x50 && b(2) === 0x44 && b(3) === 0x46; // %PDF
   if (mime === 'image/jpeg') return b(0) === 0xFF && b(1) === 0xD8;
   if (mime === 'image/png') return b(0) === 0x89 && b(1) === 0x50 && b(2) === 0x4E && b(3) === 0x47;
-  if (mime === 'image/webp') return b(0) === 0x52 && b(1) === 0x49 && b(2) === 0x46 && b(3) === 0x46; // RIFF
+  if (mime === 'image/webp') return b(0) === 0x52 && b(1) === 0x49 && b(2) === 0x46 && b(3) === 0x46 && bytes.length >= 12 && b(8) === 0x57 && b(9) === 0x45 && b(10) === 0x42 && b(11) === 0x50; // RIFF....WEBP
   return false;
 }
 
 /**
  * doc_upload: files a scan or PDF in the documents folder and lists it in the App Documents tab.
- * With link {tab, row}, the record must belong to the same dog; its link column is filled in if empty.
- * The same opId on a retry returns the first result instead of filing the document twice.
+ * With link {tab, row, expect}, the record must still be the one the app showed (expect, as in saves) and belong
+ * to the same dog; its link column is filled in if empty. The same opId on a retry returns the first result.
  */
 function docUpload_(ss, p, who) {
-  const aid = String(p.aid || '').trim(), chip = String(p.chip || '').replace(/\D/g, '');
+  let aid = String(p.aid || '').replace(/[\x00-\x1f]+/g, ' ').trim();
+  const chip = String(p.chip || '').replace(/\D/g, '');
   const bad = function (m) { return { ok: false, error: 'invalid', message: m }; };
-  if (aid && !/^[A-Za-z0-9-]{1,20}$/.test(aid)) return bad('That animal ID can’t be used to file a document.');
   if (chip && !/^\d{6,20}$/.test(chip)) return bad('That microchip number can’t be used to file a document.');
+  if (aid.length > 40) { if (!chip) return bad('That animal ID is too long to file a document under.'); aid = ''; }
   if (!aid && !chip) return bad('This dog has no animal ID or microchip to file the document under.');
   const type = String(p.type || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 60);
   if (!type) return bad('Choose what kind of document this is.');
@@ -923,23 +942,32 @@ function docUpload_(ss, p, who) {
     const fileName = base + '.' + DOC_TYPES[mime];
     const file = docFolder_().createFile(Utilities.newBlob(bytes, mime, fileName));
     const id = file.getId();
+    let sh = null, row = 0, link = null;
     try {
       file.setDescription('K-9 Salon document: ' + type + ' for ' + (dog || aid || chip));
-      const log = [];
-      let link = null;
-      if (p.link && p.link.tab && p.link.row && PROTECTED_TABS.indexOf(String(p.link.tab)) < 0) link = docLink_(ss, String(p.link.tab), Number(p.link.row), chip, id, stamp, who, dog || aid || chip, log);
-      const sh = docTab_(ss);
-      const row = sh.getLastRow() + 1;
+      // 1 · the list first, so a link is never written for a document that isn't listed
+      sh = docTab_(ss);
+      row = sh.getLastRow() + 1;
       if (row > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), 100);
-      const rec = [id, aid, chip, dog, type, date, country, note, fileName, mime, link ? link.tab : '', link ? String(link.row) : '', stamp, who, ''];
-      sh.getRange(row, 1, 1, DOC_HEADERS.length).setValues([rec.map(function (x) { return String(x).replace(/^'/, ''); })]);
-      log.unshift([stamp, who, 'Document', DOC_TAB, row, dog || aid || chip, type, '', fileName]);
+      sh.getRange(row, 1, 1, DOC_HEADERS.length).setValues([[id, aid, chip, dog, type, date, country, note, fileName, mime, '', '', stamp, who, '']]);
+      // 2 · then the record it goes with
+      const log = [[stamp, who, 'Document', DOC_TAB, row, dog || aid || chip, type, '', fileName]];
+      let skipped = '';
+      if (p.link && p.link.tab && p.link.row) {
+        link = docLink_(ss, { tab: p.link.tab, row: p.link.row, expect: p.link.expect, type: type }, chip, id, tz);
+        if (link.linked) sh.getRange(row, 11, 1, 2).setValues([[link.tab, String(link.row)]]);
+        else skipped = link.why;
+        if (link.wrote) log.push([stamp, who, 'Edited', link.tab, link.row, dog || aid || chip, link.header, '', docUrl_(id)]);
+      }
       appendLog_(ss, log);
-      const result = { ok: true, doc: { id: id, aid: aid, chip: chip, dog: dog, type: type, date: date, country: country, note: note, name: fileName, mime: mime, tab: link ? link.tab : '', row: link ? link.row : null, added: stamp, by: who, r: row }, linkWritten: !!(link && link.wrote) };
+      const result = { ok: true, doc: { id: id, aid: aid, chip: chip, dog: dog, type: type, date: date, country: country, note: note, name: fileName, mime: mime, tab: link && link.linked ? link.tab : '', row: link && link.linked ? link.row : null, added: stamp, by: who, r: row }, linkWritten: !!(link && link.wrote), linkSkipped: skipped };
       if (cacheKey) { try { cache.put(cacheKey, JSON.stringify({ hash: String(p.opHash || ''), result: result }), 21600); } catch (e) { /* too large to remember */ } }
       return result;
     } catch (err) {
-      try { file.setTrashed(true); } catch (e2) { /* leave it */ }
+      // undo: the file to the bin, the list row marked, the link cleared
+      try { file.setTrashed(true); } catch (e) { /* leave it */ }
+      try { if (sh && row) sh.getRange(row, 15).setValue(stamp + ' · not saved'); } catch (e) { /* leave it */ }
+      try { if (link && link.wrote && link.cell) link.cell.clearContent(); } catch (e) { /* leave it */ }
       throw err;
     }
   } finally {
@@ -948,35 +976,58 @@ function docUpload_(ss, p, who) {
 }
 
 /**
- * Links a document to a record of the same dog. Writes the document's address into the record's
- * link column (a header ending in "Link") only when that cell is empty, has no formula and accepts it.
+ * Links a document to a record. The record must still hold what the app showed (link.expect) and its first
+ * microchip column must be this dog's. The document's address goes into the record's link column only when there
+ * is one fitting column (a header ending in "Link"; with several, the one sharing a word with the type), the cell
+ * is empty, and no formula fills it.
  */
-function docLink_(ss, tab, row, chip, id, stamp, who, dogText, log) {
+function docLink_(ss, link, chip, id, tz) {
+  const tab = String(link.tab), row = Number(link.row);
+  const out = { tab: tab, row: row, linked: false, wrote: false, why: 'changed' };
   const sh = ss.getSheetByName(tab);
-  if (!sh || !chip || !(row >= 2 && row <= sh.getLastRow())) return null;
-  const lastCol = sh.getLastColumn();
+  if (!sh || PROTECTED_TABS.indexOf(sh.getName()) >= 0 || !chip || !(row >= 2 && row <= sh.getLastRow())) return out;
+  out.tab = sh.getName();
+  const lastCol = sh.getLastColumn(), lastRow = sh.getLastRow();
   const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
-  const vals = sh.getRange(row, 1, 1, lastCol).getValues()[0];
+  const range = sh.getRange(row, 1, 1, lastCol);
+  const vals = range.getValues()[0], forms = range.getFormulas()[0];
+  const ci = colInfo_(sh, lastRow, lastCol);
+  // the same check saves use: the row still holds what the app showed
+  const expect = Array.isArray(link.expect) ? link.expect : [];
+  if (!expect.length) return out;
+  let display = null;
+  for (let j = 0; j < expect.length; j++) {
+    const ex = expect[j], c = colOf_(headers, ex.h, ex.k);
+    if (c < 0 || forms[c] || ci.spill.indexOf(c) >= 0) continue;
+    let now = cell_(vals[c], tz);
+    if (now === TIME_ONLY) { if (!display) display = range.getDisplayValues()[0]; now = display[c]; }
+    if (!same_(now === false ? '' : now, ex.v, ex.kind)) return out;
+  }
   let chipCol = -1;
   for (let c = 0; c < headers.length; c++) if (/microchip/i.test(headers[c]) && !/puppy/i.test(headers[c])) { chipCol = c; break; }
-  if (chipCol < 0 || String(vals[chipCol]).replace(/\D/g, '') !== chip) return null; // not this dog's record
-  const out = { tab: tab, row: row, wrote: false };
-  let linkCol = -1;
-  for (let c = 0; c < headers.length; c++) if (/link$/i.test(headers[c])) { linkCol = c; break; }
-  if (linkCol < 0 || isData_(vals[linkCol])) return out;
-  const cell = sh.getRange(row, linkCol + 1);
-  if (cell.getFormula() || ruleProblem_(cell.getDataValidations()[0][0], docUrl_(id))) return out;
+  if (chipCol < 0 || String(vals[chipCol]).replace(/\D/g, '') !== chip) { out.why = 'other_dog'; return out; }
+  out.linked = true; out.why = '';
+  const links = [];
+  for (let c = 0; c < headers.length; c++) if (/link$/i.test(headers[c]) && ci.computed.indexOf(c) < 0) links.push(c);
+  let lc = links.length === 1 ? links[0] : -1;
+  if (links.length > 1) {
+    const words = String(link.type || '').toLowerCase().split(/[^a-z]+/).filter(function (w) { return w.length >= 4; });
+    const fit = links.filter(function (c) { const h = headers[c].toLowerCase(); return words.some(function (w) { return h.indexOf(w) >= 0; }); });
+    if (fit.length === 1) lc = fit[0];
+  }
+  if (lc < 0 || isData_(vals[lc]) || forms[lc]) return out;
+  const cell = sh.getRange(row, lc + 1);
+  if (ruleProblem_(cell.getDataValidations()[0][0], docUrl_(id))) return out;
   cell.setValue(docUrl_(id));
-  out.wrote = true;
-  log.push([stamp, who, 'Edited', tab, row, dogText, headers[linkCol], '', docUrl_(id)]);
+  out.wrote = true; out.cell = cell; out.header = headers[lc];
   return out;
 }
 
 function docInFolder_(file) {
-  const folderId = PropertiesService.getScriptProperties().getProperty('DOC_FOLDER_ID');
-  if (!folderId) return false;
+  const ids = docFolderIds_();
+  if (!ids.length) return false;
   const parents = file.getParents();
-  while (parents.hasNext()) if (parents.next().getId() === folderId) return true;
+  while (parents.hasNext()) if (ids.indexOf(parents.next().getId()) >= 0) return true;
   return false;
 }
 
@@ -993,7 +1044,10 @@ function docGet_(ss, p) {
   return { ok: true, mime: blob.getContentType(), name: file.getName(), data: Utilities.base64Encode(blob.getBytes()) };
 }
 
-/** doc_remove: takes a document off the list and moves the file to the Drive bin, where it can still be restored. */
+/**
+ * doc_remove: takes a document off the list and moves the file to the Drive bin, where it can still be restored.
+ * Its link is cleared wherever it is in the record's tab, even if rows were sorted since.
+ */
 function docRemove_(ss, p, who) {
   const id = String(p.id || '');
   const sh = ss.getSheetByName(DOC_TAB);
@@ -1008,17 +1062,17 @@ function docRemove_(ss, p, who) {
     sh.getRange(doc.r, 15).setValue(stamp + ' · ' + who);
     const log = [[stamp, who, 'Removed', DOC_TAB, doc.r, doc.dog || doc.aid || doc.chip, doc.type, doc.name, '']];
     try { const f = DriveApp.getFileById(id); if (docInFolder_(f)) f.setTrashed(true); } catch (e) { /* already gone */ }
-    if (doc.tab && doc.row && PROTECTED_TABS.indexOf(doc.tab) < 0) {
-      const t = ss.getSheetByName(doc.tab);
-      if (t && doc.row <= t.getLastRow()) {
-        const lastCol = t.getLastColumn();
-        const headers = t.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
-        const vals = t.getRange(doc.row, 1, 1, lastCol).getValues()[0];
-        for (let c = 0; c < headers.length; c++) {
-          if (/link$/i.test(headers[c]) && String(vals[c]).trim() === docUrl_(id)) {
-            t.getRange(doc.row, c + 1).clearContent();
-            log.push([stamp, who, 'Edited', doc.tab, doc.row, doc.dog || doc.aid || doc.chip, headers[c], docUrl_(id), '']);
-          }
+    const t = doc.tab && ss.getSheetByName(doc.tab);
+    if (t && PROTECTED_TABS.indexOf(t.getName()) < 0 && t.getLastRow() >= 2) {
+      const lastCol = t.getLastColumn(), lastRow = t.getLastRow();
+      const headers = t.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
+      for (let c = 0; c < headers.length; c++) {
+        if (!/link$/i.test(headers[c])) continue;
+        const vals = t.getRange(2, c + 1, lastRow - 1, 1).getValues();
+        for (let r = 0; r < vals.length; r++) {
+          if (String(vals[r][0]).trim() !== docUrl_(id)) continue;
+          t.getRange(r + 2, c + 1).clearContent();
+          log.push([stamp, who, 'Edited', t.getName(), r + 2, doc.dog || doc.aid || doc.chip, headers[c], docUrl_(id), '']);
         }
       }
     }

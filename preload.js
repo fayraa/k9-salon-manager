@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('k9', {
   imagesPdf: (images) => ipcRenderer.invoke('k9:images-pdf', images),
   docOpen: (doc) => ipcRenderer.invoke('k9:doc-open', doc),
   docForget: (id) => ipcRenderer.invoke('k9:doc-forget', id),
+  docPrune: (keep) => ipcRenderer.invoke('k9:doc-prune', keep),
   getUpdateState: () => ipcRenderer.invoke('k9:update-state'),
   updateCheck: () => ipcRenderer.invoke('k9:update-check'),
   updateInstall: () => ipcRenderer.invoke('k9:update-install'),
