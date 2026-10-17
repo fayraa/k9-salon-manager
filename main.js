@@ -46,7 +46,8 @@ function cleanPrefs(p) {
 }
 
 /* ---------- the bridge script ---------- */
-const WRITE_ACTIONS = ['save', 'batch', 'settings_set', 'photo_upload', 'digest_test'];
+// calls that can take a while (saves, uploads, document downloads) get a longer timeout
+const LONG_ACTIONS = ['save', 'batch', 'settings_set', 'photo_upload', 'digest_test', 'doc_upload', 'doc_remove', 'doc_get'];
 async function postToBridge(url, key, payload) {
   if (!url || !key) return { ok: false, error: 'not_setup' };
   if (!APPS_SCRIPT_URL.test(url)) return { ok: false, error: 'bad_url' };
@@ -57,7 +58,7 @@ async function postToBridge(url, key, payload) {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(Object.assign({}, payload, { key })),
       redirect: 'follow',
-      signal: AbortSignal.timeout(WRITE_ACTIONS.includes(payload && payload.action) ? 360000 : 120000),
+      signal: AbortSignal.timeout(LONG_ACTIONS.includes(payload && payload.action) ? 360000 : 120000),
     });
   } catch (err) {
     return { ok: false, error: err && err.name === 'TimeoutError' ? 'timeout' : 'network', message: String((err && err.message) || err) };
@@ -174,6 +175,59 @@ ipcMain.handle('k9:pdf', async (event, input) => {
     w.destroy();
     fsp.unlink(tmp).catch(() => {});
   }
+});
+
+/* ---------- documents ---------- */
+const DOC_EXT = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+const docDir = id => path.join(app.getPath('userData'), 'documents', id);
+const safeName = s => String(s || '').replace(/[\\/:*?"<>|\x00-\x1f]+/g, '-').replace(/^[.\s]+/, '').trim().slice(0, 120);
+
+// Several photos of one record become one PDF, a page each. Only picture data goes in; scripts are off.
+ipcMain.handle('k9:images-pdf', async (event, images) => {
+  const list = Array.isArray(images) ? images.slice(0, 30) : [];
+  const ok = list.length && list.every(u => typeof u === 'string' && u.length < 20e6 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(u));
+  if (!ok) return { ok: false, message: 'Only JPEG, PNG or WebP pictures can be combined.' };
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>@page{size:A4;margin:8mm}html,body{margin:0}.p{height:281mm;display:flex;align-items:center;justify-content:center;page-break-after:always}.p:last-child{page-break-after:auto}img{max-width:100%;max-height:281mm;object-fit:contain}</style></head><body>${list.map(u => `<div class="p"><img src="${u}" alt=""></div>`).join('')}</body></html>`;
+  const tmp = path.join(app.getPath('temp'), `k9-pages-${Date.now()}-${Math.random().toString(36).slice(2)}.html`);
+  await fsp.writeFile(tmp, html, 'utf8');
+  const w = new BrowserWindow({ show: false, webPreferences: { javascript: false, sandbox: true, contextIsolation: true } });
+  try {
+    await w.loadFile(tmp);
+    const data = await w.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
+    return { ok: true, data: Buffer.from(data).toString('base64') };
+  } catch (e) {
+    return { ok: false, message: String((e && e.message) || e) };
+  } finally {
+    w.destroy();
+    fsp.unlink(tmp).catch(() => {});
+  }
+});
+
+// Opens a document in the computer's own PDF or picture viewer, fetching it once and keeping a copy.
+ipcMain.handle('k9:doc-open', async (event, input) => {
+  const id = String((input && input.id) || '');
+  if (!/^[\w-]{6,120}$/.test(id)) return { ok: false };
+  const dir = docDir(id);
+  let file = null;
+  try { const names = await fsp.readdir(dir); if (names[0]) file = path.join(dir, names[0]); } catch (e) { /* not kept yet */ }
+  if (!file) {
+    const s = readSettings();
+    const res = await postToBridge(s.url, s.key, { action: 'doc_get', id });
+    if (!res || !res.ok || !res.data || !DOC_EXT[res.mime]) return { ok: false, error: res && res.error, message: (res && res.message) || '' };
+    const ext = DOC_EXT[res.mime];
+    const name = (safeName(res.name || (input && input.name)) || 'Document').replace(/\.[a-z0-9]{2,4}$/i, '') + '.' + ext;
+    await fsp.mkdir(dir, { recursive: true });
+    file = path.join(dir, name);
+    await fsp.writeFile(file, Buffer.from(res.data, 'base64'));
+  }
+  const err = await shell.openPath(file);
+  return err ? { ok: false, message: err } : { ok: true };
+});
+ipcMain.handle('k9:doc-forget', async (event, id) => {
+  id = String(id || '');
+  if (!/^[\w-]{6,120}$/.test(id)) return false;
+  await fsp.rm(docDir(id), { recursive: true, force: true }).catch(() => {});
+  return true;
 });
 
 /* ---------- serial scanners ---------- */

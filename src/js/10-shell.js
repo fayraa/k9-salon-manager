@@ -39,7 +39,7 @@ function renderBanners() {
   const u = S.update;
   if (u.state === 'ready' && !S.updateDismissed) out.push(`<div class="banner acc" role="status">${icon('sync')}<span><b>Version ${esc(u.version)} is ready.</b> Restart the app to finish updating.</span><button class="btn sm primary" data-action="update-install">Restart now</button><button class="btn sm ghost" data-action="update-later">Later</button></div>`);
   if (S.db && S.bridgeVersion < NEED_BRIDGE) out.push(`<div class="banner warn" role="status">${icon('info')}<span><b>Update your bridge script</b> to turn on bulk logging, litters, photos, reminders, change history and shared settings. It takes about 3 minutes.</span><button class="btn sm" data-action="bridge-help">Show me how</button></div>`);
-  else if (S.db && S.bridgeVersion < BRIDGE_LATEST && !S.bridgeLater) out.push(`<div class="banner soft" role="status">${icon('info')}<span><b>A bridge update is ready.</b> It lets the app use your sheet’s dropdown lists, such as Status, Sterilised and Kennel No. About 3 minutes.</span><button class="btn sm" data-action="bridge-help">Show me how</button><button class="btn sm ghost" data-action="bridge-later">Later</button></div>`);
+  else if (S.db && S.bridgeVersion < BRIDGE_LATEST && !S.bridgeLater) out.push(`<div class="banner soft" role="status">${icon('info')}<span><b>A bridge update is ready.</b> ${esc(bridgeNews())} About 3 minutes.</span><button class="btn sm" data-action="bridge-help">Show me how</button><button class="btn sm ghost" data-action="bridge-later">Later</button></div>`);
   $('#banners').innerHTML = out.join('');
 }
 function renderAll() {

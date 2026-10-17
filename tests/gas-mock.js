@@ -151,7 +151,20 @@ function loadBridge(ss, extra = {}) {
   const mail = [];
   const files = new Map();
   const cache = new Map();
-  let folderId = null;
+  const folders = new Map(); // id → { name, trashed }
+  const fileObj = id => {
+    const f = files.get(id);
+    let i = 0;
+    return {
+      getId: () => id, getName: () => f.getName(), setDescription: d => { f.desc = d; }, getBlob: () => f,
+      isTrashed: () => !!f.trashed, setTrashed: t => { f.trashed = !!t; },
+      getParents: () => { const ps = [f.folder].filter(Boolean); return { hasNext: () => i < ps.length, next: () => ({ getId: () => ps[i++] }) }; },
+    };
+  };
+  const folderObj = id => ({
+    getId: () => id, isTrashed: () => folders.get(id).trashed,
+    createFile: blob => { const fid = 'file' + (files.size + 1); blob.folder = id; files.set(fid, blob); return fileObj(fid); },
+  });
   const ctx = {
     console: { log() {}, warn() {} },
     Utilities, JSON, Math, Date, Number, String, Object, Array, RegExp, Error, isFinite, isNaN, parseInt, parseFloat,
@@ -168,9 +181,9 @@ function loadBridge(ss, extra = {}) {
       newTrigger: fn => { const b = { spec: { fn } }; const chain = { timeBased: () => chain, everyDays: n => (b.spec.days = n, chain), atHour: h => (b.spec.hour = h, chain), inTimezone: z => (b.spec.tz = z, chain), create: () => { const t = { getHandlerFunction: () => fn, spec: b.spec }; triggers.push(t); return t; } }; return chain; },
     },
     DriveApp: {
-      createFolder: name => { folderId = 'folder1'; return { getId: () => folderId, isTrashed: () => false, createFile: blob => { const id = 'file' + (files.size + 1); blob.folder = folderId; files.set(id, blob); return { getId: () => id, getName: () => blob.getName(), setDescription() {} }; } }; },
-      getFolderById: id => { if (id !== folderId) throw new Error('no folder'); return { getId: () => id, isTrashed: () => false, createFile: blob => { const fid = 'file' + (files.size + 1); blob.folder = folderId; files.set(fid, blob); return { getId: () => fid, getName: () => blob.getName(), setDescription() {} }; } }; },
-      getFileById: id => { if (!files.has(id)) throw new Error('no file'); const f = files.get(id); const parents = [f.folder].filter(Boolean); let i = 0; return { getBlob: () => f, getParents: () => ({ hasNext: () => i < parents.length, next: () => ({ getId: () => parents[i++] }) }) }; },
+      createFolder: name => { const id = 'folder' + (folders.size + 1); folders.set(id, { name, trashed: false }); return folderObj(id); },
+      getFolderById: id => { if (!folders.has(id)) throw new Error('no folder'); return folderObj(id); },
+      getFileById: id => { if (!files.has(id)) throw new Error('no file'); return fileObj(id); },
       _addFile: (id, blob, folder) => { blob.folder = folder; files.set(id, blob); },
     },
   };
@@ -178,7 +191,7 @@ function loadBridge(ss, extra = {}) {
   const src = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'K9AppBridge.gs'), 'utf8').replace("'__SHEET_ID__'", "'TESTID'");
   vm.runInContext(src + '\n;this.__consts = { CHANGE_TAB, PHOTO_TAB, BRIDGE_VERSION };', ctx);
   const post = body => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(Object.assign({ key: 'k'.repeat(40) }, body)) } }).getContent());
-  return { ctx, post, props, triggers, mail, files, cache };
+  return { ctx, post, props, triggers, mail, files, cache, folders };
 }
 
 module.exports = { Sheet_, Spreadsheet_, loadBridge, Utilities, DAY };

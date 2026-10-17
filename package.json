@@ -1,7 +1,7 @@
 {
   "name": "k9-salon-manager",
   "productName": "K-9 Salon Manager",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Kennel records for K-9 Salon, synced with Google Sheets",
   "author": "K-9 Salon",
   "main": "main.js",

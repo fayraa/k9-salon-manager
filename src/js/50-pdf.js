@@ -68,6 +68,7 @@ async function pdfDog(chip, id) {
   <h2>Vet treatments</h2>${pdfTable(['Date', 'Treatment', 'Clinic'], rows('Veterinary Treatments', ['Date', 'Treatment Provided', 'Vet Clinic']), 'No vet treatments recorded.')}
   <h2>Health checks</h2>${ahc ? `<p>Annual check on <b>${esc(dmy(ahc.date))}</b>: ${esc(cell(ahc.t, ahc.row, 'General Condition') || 'see record')}${cell(ahc.t, ahc.row, 'Vet Name') ? ', by ' + esc(cell(ahc.t, ahc.row, 'Vet Name')) : ''}.</p>` : ''}
   ${pdfTable(['Date', 'General', 'Remarks'], daily.map(e => [dmy(e.date), cell(e.t, e.row, 'General'), cell(e.t, e.row, 'Remarks')]), 'No health checks recorded.')}
+  ${docsFor(d).length ? `<h2>Documents on file</h2>${pdfTable(['Document', 'Date', 'Country', 'Notes'], docsFor(d).slice().sort(docSort).map(x => [x.type, docWhen(x), x.country, x.note]))}` : ''}
   ${ster ? `<h2>Sterilisation</h2><p>${esc(dmy(ster.date))}${cell(ster.t, ster.row, 'Clinic') ? ' at ' + esc(cell(ster.t, ster.row, 'Clinic')) : ''}${cell(ster.t, ster.row, 'Certificate No.') ? ' · certificate ' + esc(cell(ster.t, ster.row, 'Certificate No.')) : ''}</p>` : ''}
   <div class="sign"><div>Breeder’s signature and date</div><div>Owner’s signature and date</div></div>
   <p class="foot">This record lists the treatments entered in the breeder’s kennel records up to the date above.</p>`;

@@ -39,7 +39,7 @@ test('rejects a wrong key and unknown actions', () => {
   assert.equal(b.post({ action: 'dance' }).error, 'bad_action');
   const ping = b.post({ action: 'ping' });
   assert.equal(ping.ok, true);
-  assert.equal(ping.version, 3);
+  assert.equal(ping.version, 4);
 });
 
 test('read returns rows, formula columns, default settings and no photos', () => {
@@ -420,7 +420,7 @@ test('read sends each column’s dropdown and tick-box rules, and leaves out ver
   lit.cell(2, 15).rule = { type: 'VALUE_IN_LIST', values: ['Kept', 'Sold'] }; // a tab with headers only
   const b = loadBridge(ss);
   const r = b.post({ action: 'read', tabs: ['All Breeds', 'Mating Records', 'Puppies Bred In-House'] });
-  assert.equal(r.version, 3);
+  assert.equal(r.version, 4);
   const rules = r.tabs['All Breeds'].rules;
   assert.deepEqual(rules[8], { list: STER, strict: true });
   assert.deepEqual(rules[11].list, ['Active', 'Retired', 'Adopted', 'Sold', 'Deceased'], 'trimmed, without repeats');
@@ -489,4 +489,95 @@ test('dropdown items saved with stray spaces are matched the same way the app is
   assert.equal(ab.peek(2, 9).v, undefined, 'nothing was written');
   assert.equal(save('Y').ok, true, 'a choice the app offers is accepted');
   assert.equal(ab.peek(2, 9).v, 'Y');
+});
+
+const PDF = Buffer.from('%PDF-1.4\n% test\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n').toString('base64');
+const JPG = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0, 16, 74, 70, 73, 70, 0, 1]).toString('base64');
+const docReq = extra => Object.assign({ action: 'doc_upload', who: 'Austin', aid: 'A001', chip: '999000000000101', dog: 'Biscuit (A001)', type: 'Vaccination record', date: '2025-10-10', country: '', note: 'Booster', mime: 'application/pdf', data: PDF }, extra);
+
+test('documents: a PDF is filed in Drive, listed, linked to the dog’s record and logged, and a retry files it once', () => {
+  const { ss, vac } = fixture();
+  vac.cell(1, 12).v = 'Certificate PDF Link';
+  const b = loadBridge(ss);
+  const res = b.post(docReq({ link: { tab: 'Vaccinations', row: 2 }, opId: 'doc-1', opHash: 'h1' }));
+  assert.equal(res.ok, true);
+  assert.equal(res.linkWritten, true);
+  const f = b.files.get(res.doc.id);
+  assert.equal(f.folder, b.props.get('DOC_FOLDER_ID'), 'filed in the documents folder');
+  assert.equal(b.folders.get(f.folder).name, 'K-9 Salon Dog Documents');
+  assert.equal(f.getContentType(), 'application/pdf');
+  assert.equal(f.getName(), 'A001 Biscuit (A001) - Vaccination record 2025-10-10.pdf');
+  assert.equal(vac.peek(2, 12).v, `https://drive.google.com/file/d/${res.doc.id}/view`, 'the record links to it');
+  const idx = ss.getSheetByName('App Documents');
+  assert.ok(idx.hidden, 'the index tab is hidden');
+  assert.equal(idx.peek(2, 3).v, '999000000000101', 'microchips stay text');
+  const docs = b.post({ action: 'read', tabs: ['All Breeds'] }).docs;
+  assert.equal(docs.length, 1);
+  assert.deepEqual([docs[0].type, docs[0].date, docs[0].note, docs[0].tab, docs[0].row, docs[0].by], ['Vaccination record', '2025-10-10', 'Booster', 'Vaccinations', 2, 'Austin']);
+  const log = ss.getSheetByName('App Change Log');
+  assert.deepEqual([log.peek(2, 3).v, log.peek(3, 3).v, log.peek(3, 7).v], ['Document', 'Edited', 'Certificate PDF Link']);
+  const again = b.post(docReq({ link: { tab: 'Vaccinations', row: 2 }, opId: 'doc-1', opHash: 'h1' }));
+  assert.equal(again.replay, true);
+  assert.equal(again.doc.id, res.doc.id);
+  assert.equal(b.files.size, 1, 'pressing Save again doesn’t file it twice');
+  const got = b.post({ action: 'doc_get', id: res.doc.id });
+  assert.equal(got.ok, true);
+  assert.equal(got.mime, 'application/pdf');
+  assert.equal(got.data, PDF);
+});
+
+test('documents: wrong or oversized files are refused, and only the dog’s own record is linked', () => {
+  const { ss, vac } = fixture();
+  vac.cell(1, 12).v = 'Certificate PDF Link';
+  const b = loadBridge(ss);
+  assert.match(b.post(docReq({ mime: 'text/html' })).message, /PDF or a JPEG/);
+  assert.match(b.post(docReq({ data: JPG })).message, /isn’t a readable PDF/, 'a picture sent as a PDF is refused');
+  assert.match(b.post(docReq({ data: 'A'.repeat(14000001) })).message, /too large/);
+  assert.match(b.post(docReq({ aid: '', chip: '' })).message, /no animal ID or microchip/);
+  assert.match(b.post(docReq({ type: ' ' })).message, /what kind of document/);
+  assert.equal(b.files.size, 0, 'nothing was filed');
+  const other = b.post(docReq({ aid: 'A002', chip: '999000000000102', dog: 'Pepper (A002)', link: { tab: 'Vaccinations', row: 2 } }));
+  assert.equal(other.ok, true);
+  assert.equal(other.doc.tab, '', 'Biscuit’s vaccination isn’t linked to Pepper’s document');
+  assert.equal(vac.peek(2, 12).v, undefined);
+  vac.cell(2, 12).v = 'https://example.com/scan';
+  const kept = b.post(docReq({ type: 'Vaccination record', mime: 'image/jpeg', data: JPG, link: { tab: 'Vaccinations', row: 2 } }));
+  assert.equal(kept.ok, true);
+  assert.equal(kept.doc.tab, 'Vaccinations');
+  assert.equal(kept.linkWritten, false);
+  assert.equal(vac.peek(2, 12).v, 'https://example.com/scan', 'a link already there is left alone');
+  assert.match(kept.doc.name, /\.jpg$/);
+  const prot = b.post(docReq({ link: { tab: 'App Change Log', row: 2 } }));
+  assert.equal(prot.doc.tab, '');
+});
+
+test('documents: removing one moves it to the Drive bin, clears the link it wrote, and it can’t be fetched', () => {
+  const { ss, vac } = fixture();
+  vac.cell(1, 12).v = 'Certificate PDF Link';
+  const b = loadBridge(ss);
+  const res = b.post(docReq({ link: { tab: 'Vaccinations', row: 2 } }));
+  const keep = b.post(docReq({ type: 'Import permit' }));
+  const gone = b.post({ action: 'doc_remove', id: res.doc.id, who: 'Austin' });
+  assert.equal(gone.ok, true);
+  assert.equal(b.files.get(res.doc.id).trashed, true, 'in the bin, so it can be restored');
+  assert.equal(vac.peek(2, 12).v, undefined, 'the link to it is cleared');
+  const docs = b.post({ action: 'read', tabs: ['All Breeds'] }).docs;
+  assert.deepEqual(docs.map(d => d.id), [keep.doc.id]);
+  assert.equal(b.post({ action: 'doc_get', id: res.doc.id }).ok, false);
+  assert.equal(b.post({ action: 'doc_remove', id: res.doc.id }).ok, true, 'removing twice is harmless');
+  b.ctx.DriveApp._addFile('not-indexed', new (b.files.get(keep.doc.id).constructor)([0x25, 0x50, 0x44, 0x46, 1, 2, 3, 4], 'application/pdf', 'x.pdf'), b.props.get('DOC_FOLDER_ID'));
+  assert.equal(b.post({ action: 'doc_get', id: 'not-indexed' }).ok, false, 'only files on the list can be fetched');
+  const write = b.post({ action: 'batch', ops: [{ tab: 'App Documents', mode: 'edit', row: 2, changes: [{ h: 'Type', k: 0, v: 'x', kind: 'text' }], expect: [] }] });
+  assert.equal(write.error, 'protected');
+  const log = ss.getSheetByName('App Change Log');
+  const actions = []; for (let r = 2; r <= log.getLastRow(); r++) actions.push(log.peek(r, 3).v);
+  assert.ok(actions.includes('Removed'));
+});
+
+test('the import papers check is off by default and can be turned on', () => {
+  const { ss } = fixture();
+  const b = loadBridge(ss);
+  assert.equal(b.post({ action: 'read', tabs: [] }).settings.checks.papers, false);
+  assert.equal(b.post({ action: 'settings_set', settings: { checks: { papers: true } } }).settings.checks.papers, true);
+  assert.equal(b.post({ action: 'read', tabs: [] }).settings.checks.papers, true);
 });

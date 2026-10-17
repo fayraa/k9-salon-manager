@@ -38,6 +38,8 @@ function stub(opts) {
         if (p.action === 'batch') { let n = 200, id = 22; return { ok: true, results: p.ops.map(op => ({ row: op.mode === 'new' ? n++ : op.row, id: op.tab === 'All Breeds' && op.mode === 'new' ? 'T0' + (id++) : null })) }; }
         if (p.action === 'settings_set') return { ok: true, settings: Object.assign({}, O.read.settings, p.settings), reminders: { installed: !!(p.settings.reminders && p.settings.reminders.enabled) } };
         if (p.action === 'digest_test') return { ok: true, to: ['owner@example.com'] };
+        if (p.action === 'doc_upload') { S.docN = (S.docN || 0) + 1; const id = 'doc-new-000' + S.docN; return { ok: true, doc: { id, aid: p.aid, chip: p.chip, dog: p.dog, type: p.type, date: p.date, country: p.country, note: p.note, name: p.type + '.pdf', mime: p.mime, tab: p.link ? p.link.tab : '', row: p.link ? p.link.row : null, added: '2026-10-17 10:00', by: p.who }, linkWritten: !!p.link }; }
+        if (p.action === 'doc_remove') return { ok: true };
         return { ok: false, error: 'bad_action' };
       },
       copy: async t => { S.copies.push(t); return true; },
@@ -47,6 +49,9 @@ function stub(opts) {
       focus: async () => {},
       photo: async () => ({ ok: false }),
       pdf: async d => { S.pdfs.push(d); return { ok: true, name: d.filename }; },
+      imagesPdf: async urls => { S.combined = urls.length; S.combinedOk = urls.every(u => u.startsWith('data:image/jpeg;base64,')); return { ok: true, data: btoa('%PDF-1.4 combined test') }; },
+      docOpen: async x => { (S.opened = S.opened || []).push(x.id); return { ok: true }; },
+      docForget: async id => { (S.forgot = S.forgot || []).push(id); return true; },
       getUpdateState: async () => ({ state: 'idle' }),
       updateCheck: async () => true,
       updateInstall: async () => ({ ok: true }),
@@ -462,7 +467,7 @@ test('quick fill: licence numbers typed down the list save as one checked batch'
 });
 
 test('quick fill offers the sheet’s dropdown choices and fills only the blank boxes', async () => {
-  const { page, errors, ctx, calls } = await openApp({ version: 3 });
+  const { page, errors, ctx, calls } = await openApp({ version: 4 });
   assert.equal(await page.locator('.banner.soft').count(), 0, 'no bridge notice on the newest bridge');
   await page.click('.nav button[data-view="dogs"]');
   await page.click('#top-act [data-action="quick-fill"]');
@@ -741,6 +746,117 @@ test('a licence swap Google didn’t confirm is sent again as the same group aft
   assert.equal(batches[0].opHash, batches[1].opHash);
   assert.match(batches[2].ops[0].dog, /Biscuit/);
   assert.match(await page.textContent('.toasts'), /Saved 3 dogs/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+const PNG1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+async function openDogDrawer(page, name) {
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('[data-action="dogs-status"][data-status="all"]');
+  await page.fill('#dog-q', name);
+  await page.click('#dog-table tbody tr');
+  await page.waitForSelector('.drawer #dr-docs');
+}
+
+test('documents: a PDF is added to a dog and linked to its vaccination record', async () => {
+  const { page, errors, ctx, calls, k9 } = await openApp({ version: 4 });
+  await openDogDrawer(page, 'Biscuit');
+  assert.match(await page.textContent('#dr-docs'), /Documents · 1/);
+  assert.match(await page.textContent('.drawer .docs'), /Vaccination record.*Booster.*with the vaccination/);
+  assert.equal(await page.locator('.drawer .tl .clip').count(), 1, 'the vaccination in History shows it has a document');
+  await page.click('.drawer [data-action="doc-add"]');
+  await page.waitForSelector('#dc-type');
+  assert.equal(await page.inputValue('#dc-type'), 'Vaccination record');
+  assert.equal(await page.isHidden('#dc-country-f'), true, 'no country for a local record');
+  await page.locator('#dc-date').fill(ago(360));
+  await page.locator('#dc-date').dispatchEvent('change');
+  assert.equal(await page.inputValue('#dc-link'), 'Vaccinations|2', 'the vaccination with the same date is picked');
+  await page.click('#dc-save');
+  assert.match(await page.textContent('#dc-msg'), /Choose a PDF or photos/);
+  await page.setInputFiles('#dc-file', { name: 'scan.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%test\n') });
+  assert.match(await page.textContent('#dc-files'), /scan\.pdf/);
+  await page.fill('#dc-note', 'Booster 2');
+  await page.click('#dc-save');
+  await page.waitForFunction(() => window.__k9.calls.some(c => c.action === 'doc_upload'));
+  const up = (await calls()).find(c => c.action === 'doc_upload');
+  assert.deepEqual([up.aid, up.chip, up.type, up.date, up.mime, up.note, up.country], ['T001', chip(0), 'Vaccination record', ago(360), 'application/pdf', 'Booster 2', '']);
+  assert.equal(Buffer.from(up.data, 'base64').toString(), '%PDF-1.4\n%test\n', 'the PDF is sent as it is');
+  assert.deepEqual(up.link, { tab: 'Vaccinations', row: 2 });
+  assert.match(up.dog, /Biscuit \(T001\)/);
+  assert.ok(up.opId && up.opHash, 'a retry can’t file it twice');
+  await page.waitForSelector('.toast');
+  assert.match(await page.textContent('.toasts'), /linked to the vaccination/);
+  await page.waitForFunction(() => /Documents · 2/.test(document.querySelector('#dr-docs').textContent));
+  await page.click('.drawer [data-action="pdf-dog"]');
+  await page.waitForFunction(() => window.__k9.pdfs.length === 1);
+  assert.match((await k9()).pdfs[0].html, /Documents on file[\s\S]*Vaccination record/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('documents: an imported dog shows its import papers; photos become one PDF; open and remove', async () => {
+  const { page, errors, ctx, calls } = await openApp({ version: 4 });
+  await openDogDrawer(page, 'Luna');
+  const box = await page.textContent('section[aria-labelledby="dr-docs"]');
+  assert.match(box, /Import papers · from Thailand/);
+  assert.match(box, /Import permit · on file/);
+  assert.match(box, /Export health certificate · not added yet/);
+  await page.click('.drawer [data-action="doc-add"][data-type="Export health certificate"]');
+  await page.waitForSelector('#dc-type');
+  assert.equal(await page.inputValue('#dc-type'), 'Export health certificate');
+  assert.equal(await page.isVisible('#dc-country'), true);
+  assert.equal(await page.inputValue('#dc-country'), 'Thailand', 'the country comes from the Source column');
+  assert.equal(await page.isHidden('#dc-link-f'), true);
+  await page.setInputFiles('#dc-file', { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hello') });
+  assert.match(await page.textContent('#dc-msg'), /isn’t a PDF or a JPEG/);
+  await page.setInputFiles('#dc-file', [{ name: 'page1.png', mimeType: 'image/png', buffer: PNG1 }, { name: 'page2.png', mimeType: 'image/png', buffer: PNG1 }]);
+  assert.match(await page.textContent('#dc-files'), /2 photos.*one PDF, 2 pages/);
+  await page.setInputFiles('#dc-file', { name: 'other.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4') });
+  assert.match(await page.textContent('#dc-msg'), /one PDF on its own/);
+  await page.click('#dc-save');
+  await page.waitForFunction(() => window.__k9.calls.some(c => c.action === 'doc_upload'));
+  const up = (await calls()).find(c => c.action === 'doc_upload');
+  assert.equal(up.mime, 'application/pdf');
+  assert.equal(up.country, 'Thailand');
+  assert.equal(up.link, null);
+  assert.match(Buffer.from(up.data, 'base64').toString(), /^%PDF/);
+  assert.deepEqual(await page.evaluate(() => [window.__k9.combined, window.__k9.combinedOk]), [2, true], 'both photos, shrunk to JPEG, went into the PDF');
+  await page.waitForFunction(() => /Export health certificate · on file/.test(document.querySelector('section[aria-labelledby="dr-docs"]').textContent));
+  await page.click('.drawer .doc:has-text("Import permit") [data-action="doc-open"]');
+  await page.waitForFunction(() => (window.__k9.opened || []).length === 1);
+  assert.deepEqual(await page.evaluate(() => window.__k9.opened), ['doc-test-0002']);
+  await page.click('.drawer .doc:has-text("Import permit") [data-action="doc-remove"]');
+  await page.waitForSelector('[data-action="doc-remove-yes"]');
+  assert.match(await page.textContent('.mcard'), /bin in your Google Drive/);
+  await page.click('[data-action="doc-remove-yes"]');
+  await page.waitForFunction(() => /Import permit · not added yet/.test(document.querySelector('section[aria-labelledby="dr-docs"]').textContent));
+  const rm = (await calls()).find(c => c.action === 'doc_remove');
+  assert.equal(rm.id, 'doc-test-0002');
+  assert.deepEqual(await page.evaluate(() => window.__k9.forgot), ['doc-test-0002'], 'the copy on this computer is removed too');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('documents need the newest bridge, and the import papers check flags imported dogs', async () => {
+  const old = await openApp({ version: 3 });
+  await openDogDrawer(old.page, 'Biscuit');
+  assert.match(await old.page.textContent('section[aria-labelledby="dr-docs"]'), /needs the newest bridge script/);
+  assert.equal(await old.page.locator('.drawer [data-action="doc-add"]').count(), 0);
+  assert.match(await old.page.textContent('.banner.soft'), /documents for each dog/);
+  assert.deepEqual(old.errors, []);
+  await old.ctx.close();
+
+  const read = readResponse({ version: 4 });
+  read.settings.checks.papers = true;
+  const { page, errors, ctx } = await openApp({ read });
+  assert.match(await page.textContent('.attn'), /Import papers not on file/);
+  await page.click('.attn button[data-issue="papers"]');
+  await page.waitForSelector('#dog-table table');
+  assert.equal(await page.locator('#dog-table tbody tr').count(), 1);
+  await page.click('#dog-table tbody tr');
+  await page.waitForSelector('.drawer');
+  assert.match(await page.textContent('#dr-todo + .checks'), /Import papers not on file: export health certificate, overseas vaccination record/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

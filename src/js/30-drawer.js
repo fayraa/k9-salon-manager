@@ -37,7 +37,7 @@ function drawerHTML(d) {
   if (C.healthcheck) chk('healthcheck', lastAHC ? `Annual health check on ${dmy(lastAHC)}` : null);
   chk('vacc', vd ? `Next vaccination due ${dmy(vd)}` : null);
   if (!vd && isActive(d)) checks.push(['na', 'No vaccination due date recorded']);
-  chk('parasite', null); chk('breeding', null); chk('sterilise', null); chk('deceased', null); chk('chip', null);
+  chk('parasite', null); chk('breeding', null); chk('sterilise', null); chk('deceased', null); chk('chip', null); chk('papers', null);
   const isF = isFemale(d);
   const b = isF ? breedInfo(d) : null;
   const flags = isF ? breedingFlags(d, b) : [];
@@ -46,6 +46,7 @@ function drawerHTML(d) {
   const qa = [['Vaccinations', 'Vaccination'], ['Parasite Treatments', 'Parasite treatment'], ['Daily Health Monitoring', 'Daily check'], ['Veterinary Treatments', 'Vet treatment'], ['Annual Health Checks', 'Annual check']];
   if (isF) qa.push(['Heat Cycles', 'Heat cycle'], ['Mating Records', 'Mating']);
   qa.push(['Breeding Dog Movement', 'Movement'], ['Sterilisations', 'Sterilisation'], ['Deaths', 'Death']);
+  const docRows = new Set(docsFor(d).filter(x => x.tab && x.row).map(x => `${x.tab}|${x.row}`));
   const photo = S.photos[d.key];
   const canPhoto = S.bridgeVersion >= NEED_BRIDGE && d.key;
   return `
@@ -63,6 +64,7 @@ function drawerHTML(d) {
     </div>
     <div class="chipcard"><span class="eyebrow">Microchip</span><div class="big">${d.chip.length === 15 ? `<span><span class="cc">${d.chip.slice(0, 3)}</span>${d.chip.slice(3)}</span>` : `<span>${esc(d.chip || 'Not recorded')}</span>`}${d.chip ? `<button class="iconbtn" data-action="copy" data-copy="${esc(d.chip)}" aria-label="Copy microchip number">${icon('copy')}</button>` : ''}</div><small class="${ci.bad ? 'warn-t' : ''}">${esc(ci.text)}</small></div>
     <section class="sec" aria-labelledby="dr-todo"><h3 id="dr-todo">To do</h3><div class="checks">${checks.length ? checks.map(([s, t]) => `<div class="check"><span class="sw ${s}" aria-hidden="true"></span><span>${s === 'crit' ? '<span class="sr">Needs action: </span>' : s === 'warn' ? '<span class="sr">Coming up: </span>' : ''}${esc(t)}</span></div>`).join('') : '<div class="check"><span class="sw ok" aria-hidden="true"></span><span>Nothing to do</span></div>'}</div></section>
+    ${docsSectionHTML(d)}
     ${b ? `<section class="sec" aria-labelledby="dr-breed"><h3 id="dr-breed">Breeding</h3><dl class="kv">
       <dt>Eligibility</dt><dd>${crit.length ? `<b class="crit-t">Not eligible</b> · ${esc(crit.map(f => f.text).join('; '))}` : flags.length ? `<b class="warn-t">Check</b> · ${esc(flags.map(f => f.text).join('; '))}` : 'Eligible under your rules'}</dd>
       <dt>Now</dt><dd>${b.expecting ? `Expecting · day ${b.expecting.since}, due around ${longD(b.expecting.due)}` : 'Open'}</dd>
@@ -72,7 +74,7 @@ function drawerHTML(d) {
     <section class="sec" aria-labelledby="dr-log"><h3 id="dr-log">Log a record</h3><div class="qa">${qa.filter(([tab]) => S.db[tab]).map(([tab, l]) => `<button class="btn sm" data-action="new-entry" data-tab="${esc(tab)}" data-chip="${esc(d.chip)}">${icon('plus')}${esc(l)}</button>`).join('')}</div></section>
     <section class="sec" aria-labelledby="dr-det"><h3 id="dr-det">Details</h3><dl class="kv">${facts}</dl></section>
     ${kids.length ? `<section class="sec" aria-labelledby="dr-kids"><h3 id="dr-kids">Offspring on record · ${kids.length}</h3><div class="qa">${kids.slice(0, 40).map(k => `<button class="btn sm ghost" data-action="open-dog" data-chip="${esc(k.chip)}" data-id="${esc(k.id)}">${esc(dogName(k))}</button>`).join('')}</div></section>` : ''}
-    <section class="sec" aria-labelledby="dr-hist"><h3 id="dr-hist">History · ${tl.length}</h3>${tl.length ? `<div class="tl">${tl.slice(0, 60).map(e => `<button data-action="edit-row" data-tab="${esc(e.L.tab)}" data-r="${e.row.r}"><span class="d">${e.date ? dmy(e.date) : '—'}</span><span style="min-width:0"><b>${esc(cap(e.L.noun))}</b><small>${esc(eventSummary(e))}</small></span></button>`).join('')}</div>` : `<p class="muted" style="margin:0">${d.chip ? 'No records for this microchip yet. Use the buttons above to log one.' : 'Add a microchip number to link records to this dog.'}</p>`}</section>
+    <section class="sec" aria-labelledby="dr-hist"><h3 id="dr-hist">History · ${tl.length}</h3>${tl.length ? `<div class="tl">${tl.slice(0, 60).map(e => `<button data-action="edit-row" data-tab="${esc(e.L.tab)}" data-r="${e.row.r}"><span class="d">${e.date ? dmy(e.date) : '—'}</span><span style="min-width:0"><b>${esc(cap(e.L.noun))}</b>${docRows.has(`${e.L.tab}|${e.row.r}`) ? `<span class="clip" title="Has a document">${icon('clip')}<span class="sr">, has a document</span></span>` : ''}<small>${esc(eventSummary(e))}</small></span></button>`).join('')}</div>` : `<p class="muted" style="margin:0">${d.chip ? 'No records for this microchip yet. Use the buttons above to log one.' : 'Add a microchip number to link records to this dog.'}</p>`}</section>
   </div>`;
 }
 
@@ -94,7 +96,7 @@ async function loadDrawerPhoto(d) {
   if (!box || box.dataset.key !== d.key) return;
   box.innerHTML = url ? `<img src="${esc(url)}" alt="Photo of ${esc(dogName(d))}">` : icon('paw');
 }
-function resizeImage(file, max = 1280) {
+function resizeImage(file, max = 1280, quality = 0.85) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -104,7 +106,7 @@ function resizeImage(file, max = 1280) {
       c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(url);
-      resolve(c.toDataURL('image/jpeg', 0.85));
+      resolve(c.toDataURL('image/jpeg', quality)); // re-encoding also drops the photo's location data
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That file isn’t a picture the app can read.')); };
     img.src = url;
