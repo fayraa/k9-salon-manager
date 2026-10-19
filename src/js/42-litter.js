@@ -142,8 +142,9 @@ async function submitLitter(o, pups) {
   let res;
   try { res = await sendWrite({ action: 'batch', ops }, o.opId); o.opId = null; }
   catch (e) {
-    o.job.saving = false; btn.disabled = false; btn.textContent = e.keepOp ? 'Save again' : 'Save litter';
-    if (!e.keepOp) o.opId = null;
+    o.job.saving = false; btn.disabled = false; btn.textContent = keepOpAfter(e) ? 'Save again' : 'Save litter';
+    if (savedBefore(e)) return;
+    if (!keepOpAfter(e)) o.opId = null;
     if (e.refresh) scheduleRefresh(800);
     return say(e.code === 'row_changed' ? 'Her mating record changed in the sheet while you were working. Untick “Mark her mating as successful” or reopen this window, then save again.' : e.userMessage || String(e.message || e), true);
   }

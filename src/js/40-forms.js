@@ -277,8 +277,9 @@ async function submitForm(o) {
     scheduleRefresh();
   } catch (e) {
     job.saving = false; btn.disabled = false; btn.textContent = 'Save';
+    if (savedBefore(e)) return;
     msg.textContent = e.userMessage || String(e.message || e); msg.className = 'msg err';
-    if (e.keepOp) btn.textContent = 'Save again';
+    if (keepOpAfter(e)) btn.textContent = 'Save again';
     if (e.refresh) scheduleRefresh(800);
   }
 }
