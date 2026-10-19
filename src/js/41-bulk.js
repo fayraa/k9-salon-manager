@@ -120,8 +120,9 @@ async function submitBulk(o) {
   catch (e) {
     S.conn.state = 'live'; renderSync();
     o.job.saving = false; btn.disabled = false;
-    if (!e.keepOp) o.opId = null;
-    st.confirm = e.keepOp; btn.textContent = e.keepOp ? 'Save again' : 'Try again';
+    if (savedBefore(e)) return;
+    if (!keepOpAfter(e)) o.opId = null;
+    st.confirm = keepOpAfter(e); btn.textContent = st.confirm ? 'Save again' : 'Try again';
     if (e.refresh) scheduleRefresh(800);
     return say(e.userMessage || String(e.message || e), true);
   }
