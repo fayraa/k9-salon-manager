@@ -67,7 +67,7 @@ hr{border:0;border-top:1px solid var(--line);margin:6px 0}
 .dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.crit{background:var(--crit)}.dot.busy{background:var(--accent);animation:pulse 1.2s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.35}}
 
-.main{min-width:0;overflow:auto;display:flex;flex-direction:column}
+.main{position:relative;min-width:0;overflow:auto;display:flex;flex-direction:column} /* positioned, so hidden form controls scroll with the page instead of stretching the window */
 .top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:14px 32px;background:var(--bg);background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
 .top h1{margin:0;font-weight:800;font-size:25px;letter-spacing:-.01em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .top-act{display:flex;gap:8px}
@@ -259,7 +259,7 @@ td .before{text-decoration:line-through;color:var(--muted)}
 .radio{display:inline-flex;align-items:center;gap:10px;min-height:44px;padding:8px 16px 8px 12px;border:1px solid var(--line-2);border-radius:12px;background:var(--surface);cursor:pointer;font-weight:700}
 .radio:has(input:checked){border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
 .radio input{width:18px;height:18px;accent-color:var(--accent);margin:0}
-.toggle{display:flex;gap:14px;align-items:flex-start;cursor:pointer}
+.toggle{position:relative;display:flex;gap:14px;align-items:flex-start;cursor:pointer}
 .toggle input{position:absolute;opacity:0;width:1px;height:1px}
 .toggle .tg{flex:none;width:48px;height:28px;border-radius:999px;background:var(--line-2);position:relative;transition:background .15s;margin-top:2px}
 .toggle .tg::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .15s}

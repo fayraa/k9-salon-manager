@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.1
+
+**Fixed**
+- Settings could be scrolled far past its last section into empty space. Every page now stops scrolling at its last item, on the computer and on phones.
+
 ## 1.4.0
 
 **New**
