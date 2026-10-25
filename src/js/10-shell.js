@@ -72,7 +72,7 @@ function afterViewRender() {
   if (S.view === 'settings') afterSettings();
 }
 function go(view, tab) {
-  if (view !== 'settings' && S.phoneCode) { S.phoneCode = false; clearTimeout(phoneCodeTimer); } // the connection code never stays on screen behind you
+  if (view !== 'settings') hidePhoneCode(); // the connection code never stays on screen behind you
   S.view = view; S.tab = view === 'log' ? tab : null;
   if (view === 'log') S.logQ = '';
   store.set('k9.view', view); store.set('k9.tab', tab || '');
@@ -115,18 +115,29 @@ function closeTop(force) {
 }
 /* On a phone, the Back button (or gesture) closes what's open, instead of leaving the app.
    While a dialog, profile or the sections menu is open there is one extra history entry for Back to use up. */
-let backEntry = false, ignorePop = 0;
+// The entry is matched up after the current step, so closing one dialog and opening another (a search result, say)
+// leaves it in place; and nothing new is added while the app's own step back is still under way.
+let backEntry = false, backPending = false, backQueued = false, backTimer = null;
+const isOpen = () => OV.length > 0 || $('#shell').classList.contains('nav-open');
 function syncBack() {
-  if (!WEB) return;
-  const open = OV.length > 0 || $('#shell').classList.contains('nav-open');
-  if (open && !backEntry) { backEntry = true; try { history.pushState({ k9: 'open' }, ''); } catch (e) { backEntry = false; } }
-  else if (!open && backEntry) { backEntry = false; ignorePop++; history.back(); }
+  if (!WEB || backQueued) return;
+  backQueued = true;
+  setTimeout(() => {
+    backQueued = false;
+    if (backPending) return; // finishes when the step back arrives
+    if (isOpen() && !backEntry) { try { history.pushState({ k9: 'open' }, ''); backEntry = true; } catch (e) { /* history unavailable */ } }
+    else if (!isOpen() && backEntry) {
+      backEntry = false; backPending = true;
+      history.back();
+      backTimer = setTimeout(() => { backPending = false; syncBack(); }, 1500); // in case the step back never arrives
+    }
+  }, 0);
 }
-window.addEventListener('popstate', () => {
+window.addEventListener('popstate', e => {
   if (!WEB) return;
-  if (ignorePop) { ignorePop--; return; }
-  backEntry = false;
-  if (OV.length) closeTop(); else closeNav();
+  backEntry = !!(e.state && e.state.k9 === 'open');
+  if (backPending) { backPending = false; clearTimeout(backTimer); syncBack(); return; } // the app's own step back
+  if (!backEntry) { if (OV.length) closeTop(); else closeNav(); } // Back pressed: close what's on top
   syncBack(); // something is still open (another dialog, or a form with unsaved changes), so Back keeps working
 });
 const topOverlay = kind => { const o = OV[OV.length - 1]; return o && (!kind || o.kind === kind) ? o : null; };

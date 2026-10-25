@@ -59,18 +59,22 @@ function skippedNote(list) {
 
 async function connect() {
   clearInterval(S.poll);
+  // a read still on its way from the previous connection is ignored when it arrives
+  loadGen++; deskLoading = null;
   if (!S.prefs.url || !S.prefs.key) { S.conn = { state: 'setup', code: 'not_setup', msg: DESK_COPY.not_setup, at: 0 }; renderAll(); return; }
   S.conn = { state: S.db ? 'stale' : 'starting', code: '', msg: S.db ? 'Refreshing…' : '', at: S.conn.at };
   renderSync(); if (!S.db) renderView();
   await deskLoad();
   S.poll = setInterval(() => { if (document.visibilityState === 'visible' && !S.saving && !OV.some(o => o.job && o.job.saving)) deskLoad(); }, 120000);
 }
-let deskLoading = null;
+let deskLoading = null, loadGen = 0;
 function deskLoad() {
   if (deskLoading) return deskLoading;
-  deskLoading = (async () => {
+  const gen = loadGen;
+  const p = deskLoading = (async () => {
     const res = await deskCall({ action: 'read', tabs: wanted(), limits: READ_LIMITS, v: 2 });
-    deskLoading = null;
+    if (deskLoading === p) deskLoading = null;
+    if (gen !== loadGen) return; // the connection changed while this was loading
     if (!res || !res.ok) {
       const code = (res && res.error) || 'network';
       if (code === 'not_setup') { S.conn = { state: 'setup', code, msg: DESK_COPY.not_setup, at: 0 }; renderAll(); return; }
@@ -79,7 +83,7 @@ function deskLoad() {
     }
     S.sheetTitle = res.title || 'Google Sheet';
     if (res.url) { S.sheetUrl = res.url; const id = sheetIdFrom(res.url); if (id && id !== S.prefs.sheetId) setPrefs({ sheetId: id }); }
-    S.bridgeVersion = res.version || 1;
+    S.bridgeVersion = Math.max(1, Math.floor(Number(res.version)) || 1); // a number, whatever the bridge sends
     if (res.settings) S.shared = mergeShared(res.settings);
     S.photos = res.photos || {};
     // a list that couldn't be read keeps what was shown before, and nothing on this computer is cleared
@@ -90,7 +94,7 @@ function deskLoad() {
     if (!res.tabs || !res.tabs[MASTER]) { S.conn = { state: 'error', code: 'no_master', msg: 'The spreadsheet has no “All Breeds” tab. Rename the main tab back to “All Breeds”.', at: 0 }; renderAll(); return; }
     applyDb(parseBridge(res), Date.now());
   })();
-  return deskLoading;
+  return p;
 }
 function applyDb(db, at) {
   const first = !S.db;
@@ -232,6 +236,7 @@ async function submitConnForm(f) {
   toast(`Connected to “${res.title || 'your sheet'}”${res.version < BRIDGE_LATEST ? '. Your bridge script has an update available.' : ''}`);
   if (topOverlay('conn')) closeTop(true);
   S.db = null;
+  hidePhoneCode(); // a code showing the old connection never comes back
   if (S.view === 'settings') S.view = 'home';
   connect();
 }

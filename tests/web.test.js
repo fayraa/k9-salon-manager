@@ -20,11 +20,13 @@ const { Sheet_, Spreadsheet_, loadBridge, Utilities } = require('./gas-mock');
 const WEB = path.join(__dirname, '..', 'web');
 const KEY = 'k'.repeat(40);
 const BRIDGE = 'https://script.google.com/macros/s/AKfycbTEST0123456789/exec';
+const BRIDGE_B = 'https://script.google.com/macros/s/AKfycbOTHERSHEETbbbbbb/exec';
+const code = (url, key) => { const m = url.match(/\/s\/([\w-]+)\/exec$/); return `K9SALON:1:s=${m[1]}&k=${key}`; };
 const TYPES = { html: 'text/html', css: 'text/css', js: 'application/javascript', woff2: 'font/woff2', png: 'image/png', webmanifest: 'application/manifest+json', gs: 'text/plain', txt: 'text/plain' };
 const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
 
 let browser, server, google, ORIGIN, TMP;
-const G = { bridge: null, calls: [], replies: new Map(), mode: 'ok' };
+const G = { bridges: {}, calls: [], replies: new Map(), mode: 'ok', slowRead: {}, siteDown: false };
 /** Starts Chromium with script.google.com and script.googleusercontent.com pointed at the stand-in for Google. */
 function launch(extraArgs = []) {
   const port = google.address().port;
@@ -49,22 +51,28 @@ test.before(async () => {
     let body = '';
     req.on('data', c => { body += c; });
     req.on('end', () => {
-      if (`https://${host}${u.pathname}` !== BRIDGE || req.method !== 'POST') { res.writeHead(404, { 'Content-Type': 'text/html' }); res.end('<html>Sorry, unable to open the file at this time.</html>'); return; }
+      const at = `https://${host}${u.pathname}`, bridge = G.bridges[at];
+      if (!bridge || req.method !== 'POST') { res.writeHead(404, { 'Content-Type': 'text/html' }); res.end('<html>Sorry, unable to open the file at this time.</html>'); return; }
       if (G.mode === 'signin') { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<html>Sign in to continue to Google Apps Script</html>'); return; } // "Who has access" isn't set to Anyone
       let payload = null;
       try { payload = JSON.parse(body); } catch (e) { /* left as null */ }
-      G.calls.push({ payload, contentType: req.headers['content-type'], cookie: req.headers.cookie || '', origin: req.headers.origin || '' });
-      const out = G.bridge.ctx.doPost({ postData: { contents: body } }).getContent();
-      const id = `r${G.replies.size + 1}`;
-      G.replies.set(id, out);
-      res.writeHead(302, { Location: `https://script.googleusercontent.com/macros/echo?user_content_key=${id}&lib=TEST`, 'Access-Control-Allow-Origin': '*' });
-      res.end();
+      G.calls.push({ at, payload, contentType: req.headers['content-type'], cookie: req.headers.cookie || '', origin: req.headers.origin || '' });
+      const reply = () => {
+        const out = bridge.ctx.doPost({ postData: { contents: body } }).getContent();
+        const id = `r${G.replies.size + 1}`;
+        G.replies.set(id, out);
+        res.writeHead(302, { Location: `https://script.googleusercontent.com/macros/echo?user_content_key=${id}&lib=TEST`, 'Access-Control-Allow-Origin': '*' });
+        res.end();
+      };
+      const slow = payload && payload.action === 'read' ? G.slowRead[at] || 0 : 0;
+      if (slow) setTimeout(reply, slow); else reply();
     });
   });
   await new Promise(r => google.listen(0, '127.0.0.1', r));
   browser = await launch();
   // the published folder, served as GitHub Pages would serve it
   server = http.createServer((req, res) => {
+    if (G.siteDown) { req.socket.destroy(); return; } // no connection at all
     let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     if (!p.startsWith('/k9/')) { res.writeHead(404); res.end(); return; }
     p = p.slice(4) || 'index.html';
@@ -98,7 +106,7 @@ function sheetFromFixture() {
 async function openPhone(opts = {}) {
   const ss = opts.ss || sheetFromFixture();
   const bridge = opts.bridge || loadBridge(ss);
-  G.bridge = bridge; G.calls = []; G.mode = 'ok';
+  G.bridges = Object.assign({ [BRIDGE]: bridge }, opts.bridges || {}); G.calls = []; G.mode = 'ok'; G.slowRead = {}; G.siteDown = false;
   const calls = G.calls;
   const ctx = await (opts.browser || browser).newContext(Object.assign({}, PHONE, { serviceWorkers: opts.sw || 'block', ignoreHTTPSErrors: true }, opts.context || {}));
   if (opts.prefs !== null) {
@@ -116,26 +124,6 @@ async function openPhone(opts = {}) {
 const noSideScroll = page => page.evaluate(() => {
   const wide = [...document.querySelectorAll('body *')].filter(el => { const r = el.getBoundingClientRect(); return r.width && r.right > innerWidth + 1 && !el.closest('.table-wrap,.seg,.set-nav,.tabs,.ov .pup-table,.qf-wrap,.scan-view'); });
   return { page: document.documentElement.scrollWidth <= innerWidth + 1 && document.querySelector('#main').scrollWidth <= document.querySelector('#main').clientWidth + 1, wide: wide.slice(0, 5).map(el => `${el.tagName}.${el.className}`) };
-});
-
-test('opened from the computer’s code, the phone asks before connecting, then shows the kennel', async () => {
-  const { page, ctx, errors, calls } = await openPhone({ prefs: null, hash: `#s=AKfycbTEST0123456789&k=${KEY}`, wait: '.mcard' });
-  assert.ok(!page.url().includes('k='), 'the key is taken out of the address bar straight away');
-  assert.match(await page.textContent('.mcard h2'), /Connect this phone/);
-  assert.match(await page.textContent('.mcard'), /Test Kennel Records/);
-  assert.equal(await page.evaluate(() => localStorage.getItem('k9.prefs')), null, 'nothing is kept before you agree');
-  await page.fill('#cn-who', 'Pat Phone');
-  await page.click('.mcard button[type=submit]');
-  await page.waitForSelector('.quick');
-  const prefs = JSON.parse(await page.evaluate(() => localStorage.getItem('k9.prefs')));
-  assert.deepEqual([prefs.url, prefs.key, prefs.who], [BRIDGE, KEY, 'Pat Phone']);
-  assert.ok(!calls.some(c => c.preflight), 'no preflight requests, which Google’s web apps don’t answer');
-  assert.ok(calls.every(c => /^text\/plain/.test(c.contentType) && !c.cookie), 'plain-text requests without cookies, which Google answers from any site');
-  assert.ok(calls.some(c => c.payload.action === 'ping') && calls.some(c => c.payload.action === 'read'));
-  assert.ok(await page.isVisible('#tabbar'), 'the sections sit along the bottom');
-  assert.ok(!(await page.isVisible('.rail')), 'the side menu stays out of the way');
-  assert.deepEqual(errors, []);
-  await ctx.close();
 });
 
 /* helpers for files */
@@ -185,6 +173,18 @@ async function photo(page, label) {
   }, label);
   return { name: `${label}.jpg`, mimeType: 'image/jpeg', buffer: Buffer.from(b64, 'base64') };
 }
+/** A browser whose camera sees a QR code on a screen. */
+function cameraSeeing(text) {
+  const m = qrMatrix(text);
+  const W = 640, H = 480, mod = 7, n = m.length + 8, size = n * mod, ox = (W - size) >> 1, oy = (H - size) >> 1;
+  const Y = Buffer.alloc(W * H, 200);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) Y[(oy + y) * W + ox + x] = 250;
+  m.forEach((row, y) => row.forEach((dark, x) => { if (dark) for (let dy = 0; dy < mod; dy++) for (let dx = 0; dx < mod; dx++) Y[(oy + (y + 4) * mod + dy) * W + ox + (x + 4) * mod + dx] = 20; }));
+  const UV = Buffer.alloc(W * H / 4, 128);
+  const file = path.join(TMP, `camera-${Date.now()}.y4m`);
+  fs.writeFileSync(file, Buffer.concat([Buffer.from(`YUV4MPEG2 W${W} H${H} F10:1 Ip A1:1 C420jpeg\n`), ...[1, 2, 3].flatMap(() => [Buffer.from('FRAME\n'), Y, UV, UV])]));
+  return launch(['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${file}`]);
+}
 const openDogCard = async (page, name) => {
   await page.click('#tabbar [data-view="dogs"]');
   await page.fill('#dog-q', name);
@@ -192,28 +192,96 @@ const openDogCard = async (page, name) => {
   await page.waitForSelector('.drawer h2');
 };
 
-test('a wrong key, or a bridge that asks people to sign in, is explained and nothing is kept', async () => {
-  const { page, ctx, errors } = await openPhone({ prefs: null, hash: `#s=AKfycbTEST0123456789&k=${'x'.repeat(40)}`, wait: '#view .setup' });
-  await page.waitForSelector('.toast.err');
-  assert.match(await page.textContent('.toast.err'), /access key doesn’t match/);
+test('connecting a phone: the app scans the computer’s code, says which sheet, and keeps nothing until you agree', async () => {
+  const cam = await cameraSeeing(code(BRIDGE, KEY));
+  try {
+    const { page, ctx, errors, calls } = await openPhone({ browser: cam, prefs: null, wait: '#view .setup', context: { permissions: ['camera'] } });
+    assert.equal(await page.evaluate(() => !!window.jsQR), false, 'the code reader loads only when scanning');
+    await page.click('[data-action="scan-connect"]');
+    await page.waitForSelector('form.mcard h2:text("Connect this phone?")', { timeout: 20000 });
+    assert.match(await page.textContent('form.mcard'), /Test Kennel Records \(web app …456789\)/);
+    assert.equal(await page.evaluate(() => localStorage.getItem('k9.prefs')), null, 'nothing is kept before you agree');
+    await page.fill('#cn-who', 'Pat Phone');
+    await page.click('form.mcard button[type=submit]');
+    await page.waitForSelector('.quick');
+    const prefs = JSON.parse(await page.evaluate(() => localStorage.getItem('k9.prefs')));
+    assert.deepEqual([prefs.url, prefs.key, prefs.who], [BRIDGE, KEY, 'Pat Phone']);
+    assert.ok(!calls.some(c => c.preflight), 'no preflight requests, which Google’s web apps don’t answer');
+    assert.ok(calls.every(c => /^text\/plain/.test(c.contentType) && !c.cookie), 'plain-text requests without cookies, which Google answers from any site');
+    assert.ok(calls.some(c => c.payload.action === 'ping') && calls.some(c => c.payload.action === 'read'));
+    assert.ok(await page.isVisible('#tabbar'), 'the sections sit along the bottom');
+    assert.ok(!(await page.isVisible('.rail')), 'the side menu stays out of the way');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  } finally { await cam.close(); }
+});
+
+test('a key in the address is never used or kept', async () => {
+  const { page, ctx, errors, calls } = await openPhone({ prefs: null, hash: `#s=AKfycbTEST0123456789&k=${KEY}`, wait: '#view .setup' });
+  assert.equal(page.url(), `${ORIGIN}/k9/`, 'taken out of the address bar straight away');
+  await page.waitForTimeout(300);
   assert.equal(await page.locator('.mcard').count(), 0);
-  // the manual form: a deployment that only lets signed-in people in
-  G.mode = 'signin';
-  await page.click('details.manual summary');
-  await page.fill('#setup-form-url', BRIDGE);
-  await page.fill('#setup-form-key', KEY);
-  await page.click('#setup-form button[type=submit]');
-  await page.waitForFunction(() => /Who has access/.test(document.querySelector('#setup-form .set-msg').textContent));
+  assert.equal(calls.length, 0, 'nothing is sent anywhere');
   assert.equal(await page.evaluate(() => localStorage.getItem('k9.prefs')), null);
-  errors.splice(0, errors.length, ...errors.filter(e => !/blocked by CORS policy/.test(e))); // the browser's own note about the sign-in page
-  // fixed: it connects, and keeps the name typed with it
-  G.mode = 'ok';
-  await page.fill('#setup-form-who', 'Kim Kennel');
-  await page.click('#setup-form button[type=submit]');
-  await page.waitForSelector('.quick');
-  assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem('k9.prefs'))).who, 'Kim Kennel');
   assert.deepEqual(errors, []);
   await ctx.close();
+});
+
+test('a wrong key, or a bridge that asks people to sign in, is explained and nothing is kept', async () => {
+  const cam = await cameraSeeing(code(BRIDGE, 'x'.repeat(40)));
+  try {
+    const { page, ctx, errors } = await openPhone({ browser: cam, prefs: null, wait: '#view .setup', context: { permissions: ['camera'] } });
+    await page.click('[data-action="scan-connect"]');
+    await page.waitForSelector('.toast.err', { timeout: 20000 });
+    assert.match(await page.textContent('.toast.err'), /access key doesn’t match/);
+    await page.waitForSelector('.mcard', { state: 'detached' }); // the scanner closes, and nothing is offered
+    // the manual form: a deployment that only lets signed-in people in
+    G.mode = 'signin';
+    await page.click('details.manual summary');
+    await page.fill('#setup-form-url', BRIDGE);
+    await page.fill('#setup-form-key', KEY);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#setup-form-key')).fontSize), '16px', 'big enough that iPhones don’t zoom in');
+    await page.click('#setup-form button[type=submit]');
+    await page.waitForFunction(() => /Who has access/.test(document.querySelector('#setup-form .set-msg').textContent));
+    assert.equal(await page.evaluate(() => localStorage.getItem('k9.prefs')), null);
+    errors.splice(0, errors.length, ...errors.filter(e => !/blocked by CORS policy/.test(e))); // the browser's own note about the sign-in page
+    // fixed: it connects, and keeps the name typed with it
+    G.mode = 'ok';
+    await page.fill('#setup-form-who', 'Kim Kennel');
+    await page.click('#setup-form button[type=submit]');
+    await page.waitForSelector('.quick');
+    assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem('k9.prefs'))).who, 'Kim Kennel');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  } finally { await cam.close(); }
+});
+
+test('switching to another sheet says which is which, and a read still on its way from the old one is ignored', async () => {
+  const ssB = sheetFromFixture();
+  ssB.getSheetByName('All Breeds').getRange(2, 3).setValue('Zebra');
+  const cam = await cameraSeeing(code(BRIDGE_B, KEY));
+  try {
+    const { page, ctx, errors, calls } = await openPhone({ browser: cam, bridges: { [BRIDGE_B]: loadBridge(ssB) }, context: { permissions: ['camera'] } });
+    G.slowRead[BRIDGE] = 2500;
+    await page.click('#sync-mini'); // a read from the first sheet, still on its way
+    await page.click('#tabbar [data-action="menu"]');
+    await page.click('#nav [data-view="settings"]');
+    await page.click('#set-connection [data-action="scan-connect"]');
+    await page.waitForSelector('form.mcard h2:text("Switch this phone to another sheet?")', { timeout: 20000 });
+    const text = await page.textContent('form.mcard');
+    assert.match(text, /web app …bbbbbb/);
+    assert.match(text, /now uses Test Kennel Records \(web app …456789\)/);
+    await page.click('form.mcard button[type=submit]');
+    await page.waitForSelector('.quick');
+    await page.waitForTimeout(3000); // the old read arrives meanwhile
+    await page.click('#tabbar [data-view="dogs"]');
+    await page.fill('#dog-q', 'Zebra');
+    assert.equal(await page.locator('.dogcard').count(), 1, 'the new sheet’s dogs are shown');
+    assert.ok(calls.some(c => c.at === BRIDGE_B && c.payload.action === 'read'), 'the new sheet was read');
+    assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem('k9.prefs'))).url, BRIDGE_B);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  } finally { await cam.close(); }
 });
 
 test('on a phone, a vaccination logged from a dog’s profile is written to the sheet by the real bridge', async () => {
@@ -242,8 +310,8 @@ test('the phone makes the health record, monthly and due-list PDFs itself, and t
   const { page, ctx, errors } = await openPhone();
   await openDogCard(page, 'Biscuit');
   await page.click('.drawer [data-action="pdf-dog"]');
-  assert.match(await page.textContent('.mcard h2', { timeout: 30000 }).catch(() => ''), /PDF is ready|/);
   const dog = await saveOffered(page);
+  assert.equal(await page.textContent('.mcard h2'), 'Your PDF is ready');
   assert.match(dog.name, /^Health record Biscuit T001 \d{4}-\d{2}-\d{2}\.pdf$/);
   const d = readPdf(dog.buf);
   assert.equal(d.pages, 1);
@@ -319,30 +387,6 @@ test('documents on a phone: camera photos become one PDF, a single photo stays a
   await ctx.close();
 });
 
-test('the in-app scanner reads the computer’s code with the camera and connects', async () => {
-  // a camera that sees the code on a screen
-  const m = qrMatrix(`${ORIGIN}/k9/#s=AKfycbTEST0123456789&k=${KEY}`);
-  const W = 640, H = 480, mod = 7, n = m.length + 8, size = n * mod, ox = (W - size) >> 1, oy = (H - size) >> 1;
-  const Y = Buffer.alloc(W * H, 200);
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) Y[(oy + y) * W + ox + x] = 250;
-  m.forEach((row, y) => row.forEach((dark, x) => { if (dark) for (let dy = 0; dy < mod; dy++) for (let dx = 0; dx < mod; dx++) Y[(oy + (y + 4) * mod + dy) * W + ox + (x + 4) * mod + dx] = 20; }));
-  const UV = Buffer.alloc(W * H / 4, 128);
-  const file = path.join(TMP, 'camera.y4m');
-  fs.writeFileSync(file, Buffer.concat([Buffer.from(`YUV4MPEG2 W${W} H${H} F10:1 Ip A1:1 C420jpeg\n`), ...[1, 2, 3].flatMap(() => [Buffer.from('FRAME\n'), Y, UV, UV])]));
-  const cam = await launch(['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${file}`]);
-  try {
-    const { page, ctx, errors } = await openPhone({ browser: cam, prefs: null, wait: '#view .setup', context: { permissions: ['camera'] } });
-    await page.click('[data-action="scan-connect"]');
-    await page.waitForSelector('.mcard h2:text("Connect this phone?")', { timeout: 20000 });
-    assert.equal(await page.evaluate(() => !!window.jsQR), true, 'the code reader loads only when scanning');
-    await page.click('.mcard button[type=submit]');
-    await page.waitForSelector('.quick');
-    assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem('k9.prefs'))).key, KEY);
-    assert.deepEqual(errors, []);
-    await ctx.close();
-  } finally { await cam.close(); }
-});
-
 test('the phone layout fits: no sideways scrolling on any screen, with extra large text too', async () => {
   for (const textSize of [1, 1.3]) {
     const { page, ctx, errors } = await openPhone({ context: { viewport: { width: 360, height: 740 } }, prefs: { url: BRIDGE, key: KEY, who: 'Sam Tester', textSize } });
@@ -383,8 +427,14 @@ test('More opens every section, keeps the focus inside, and Escape closes it aga
 test('the home screen: the app offers to install, and the iPhone gets the Share instructions instead', async () => {
   const { page, ctx, errors } = await openPhone();
   assert.equal(await page.locator('[data-action="install-app"]').count(), 0);
+  // the offer arrives while someone is typing in Settings: what they typed stays put
+  await page.click('#tabbar [data-action="menu"]');
+  await page.click('#nav [data-view="settings"]');
+  await page.fill('#conn-form-key', 'half typed');
   await page.evaluate(() => { const e = new Event('beforeinstallprompt'); e.prompt = () => { window.__prompted = true; }; e.userChoice = Promise.resolve({ outcome: 'accepted' }); window.dispatchEvent(e); });
   await page.waitForSelector('.banner [data-action="install-app"]');
+  assert.equal(await page.inputValue('#conn-form-key'), 'half typed');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'conn-form-key');
   await page.click('.banner [data-action="install-app"]');
   await page.waitForSelector('.banner [data-action="install-app"]', { state: 'detached' });
   assert.equal(await page.evaluate(() => window.__prompted), true);
@@ -400,7 +450,7 @@ test('the home screen: the app offers to install, and the iPhone gets the Share 
   await ios.ctx.close();
 });
 
-test('the home screen app keeps its files, so it still opens without a connection', async () => {
+test('the home screen app keeps only its own files, checks them, and still opens without a connection', async () => {
   const { page, ctx, errors } = await openPhone({ sw: 'allow' });
   await page.evaluate(() => navigator.serviceWorker.ready);
   await page.reload();
@@ -414,15 +464,38 @@ test('the home screen app keeps its files, so it still opens without a connectio
     assert.ok(ok, `${ic.src} is a PNG`);
   }
   assert.ok(man.icons.some(i => i.purpose === 'maskable'));
-  const cached = await page.evaluate(async () => (await caches.keys()).filter(k => k.startsWith('k9-salon-')));
-  assert.equal(cached.length, 1);
+  // only the app's files are kept: never the bridge's replies, never the bridge script or other pages
+  await page.evaluate(() => fetch('K9AppBridge.gs'));
+  const kept = await page.evaluate(async () => { const names = (await caches.keys()).filter(k => k.startsWith('k9-salon-')); const c = await caches.open(names[0]); return { names, urls: (await c.keys()).map(r => r.url) }; });
+  assert.equal(kept.names.length, 1);
+  assert.ok(kept.urls.length >= 8);
+  assert.ok(kept.urls.every(u => u.startsWith(`${ORIGIN}/k9/`) && /\/k9\/($|app\.js|app\.css|fonts|k9-web\.js|manifest|icons\/)/.test(u)), `only app files: ${kept.urls.join(' ')}`);
+  // a copy changed by another page on the same site is never used
+  await page.evaluate(async () => { const n = (await caches.keys()).find(k => k.startsWith('k9-salon-')); const c = await caches.open(n); const k = (await c.keys()).find(r => /app\.js/.test(r.url)); await c.put(k, new Response('document.title = "PWNED";', { headers: { 'Content-Type': 'application/javascript' } })); });
+  await page.reload();
+  await page.waitForSelector('.quick');
+  assert.notEqual(await page.title(), 'PWNED');
+  // no connection at all: the kept page still opens
+  G.siteDown = true;
   await ctx.setOffline(true);
   await page.reload();
   await page.waitForSelector('#view .empty', { timeout: 15000 });
   assert.match(await page.textContent('#view'), /couldn’t load|Not connected/i);
   assert.ok(await page.isVisible('#tabbar'));
   await ctx.setOffline(false);
-  assert.deepEqual(errors.filter(e => !/ERR_INTERNET_DISCONNECTED|Failed to fetch/.test(e)), []);
+  G.siteDown = false;
+  assert.deepEqual(errors.filter(e => !/ERR_INTERNET_DISCONNECTED|Failed to fetch|ERR_EMPTY_RESPONSE|ERR_CONNECTION/.test(e)), []);
+  await ctx.close();
+});
+
+test('another site can’t show the app inside its own page', async () => {
+  const ctx = await browser.newContext(PHONE);
+  const page = await ctx.newPage();
+  await page.goto(`${ORIGIN}/elsewhere`).catch(() => {});
+  await page.setContent(`<iframe src="${ORIGIN}/k9/" style="width:390px;height:600px"></iframe>`);
+  const frame = await (await page.waitForSelector('iframe')).contentFrame();
+  await frame.waitForFunction(() => document.body && /own browser tab/.test(document.body.textContent));
+  assert.equal(await frame.locator('#shell').count(), 0);
   await ctx.close();
 });
 
@@ -433,6 +506,7 @@ test('the phone’s Back button closes what’s open, one step at a time, instea
   await openDogCard(page, 'Pepper');
   await page.click('.drawer [data-action="new-entry"][data-tab="Vaccinations"]');
   await page.waitForSelector('form.mcard');
+  await page.waitForTimeout(50);
   assert.equal(await page.evaluate(() => history.length), start + 1, 'one extra step, however many things are open');
   await back();
   await page.waitForSelector('form.mcard', { state: 'detached' });
@@ -444,14 +518,39 @@ test('the phone’s Back button closes what’s open, one step at a time, instea
   await page.click('.top [data-action="add-dog"]');
   await page.waitForSelector('form.mcard');
   await page.fill('form.mcard label:has-text("Name") + input', 'Waffle Two');
+  await page.waitForTimeout(50);
   await back();
   await page.waitForSelector('.guard');
   assert.ok(await page.isVisible('form.mcard'), 'unsaved changes aren’t thrown away by Back');
   await page.click('[data-action="guard-discard"]');
   await page.waitForSelector('form.mcard', { state: 'detached' });
+  // a search result closes the search and opens the profile in one step: Back still closes the profile
+  await page.click('.searchbtn');
+  await page.fill('#pal-q', 'Mochi');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.drawer h2:text("Mochi")');
+  await page.waitForTimeout(100);
+  await back();
+  await page.waitForSelector('.drawer', { state: 'detached' });
+  assert.ok(page.url().startsWith(`${ORIGIN}/k9/`), 'still in the app');
+  // and again, closed with its X button this time, then Back from a fresh profile
+  await page.click('.searchbtn');
+  await page.fill('#pal-q', 'Pepper');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.drawer h2:text("Pepper")');
+  await page.click('.drawer [data-action="close-top"]');
+  await page.waitForSelector('.drawer', { state: 'detached' });
+  await page.waitForTimeout(300);
+  assert.ok(page.url().startsWith(`${ORIGIN}/k9/`), 'closing it doesn’t leave the app');
+  await openDogCard(page, 'Biscuit');
+  await page.waitForTimeout(50); // (a person can't press Back within the same moment)
+  await back();
+  await page.waitForSelector('.drawer', { state: 'detached' });
+  assert.ok(page.url().startsWith(`${ORIGIN}/k9/`));
   // the sections menu too
   await page.click('#tabbar [data-action="menu"]');
   await page.waitForFunction(() => document.querySelector('#shell').classList.contains('nav-open'));
+  await page.waitForTimeout(50);
   await back();
   await page.waitForFunction(() => !document.querySelector('#shell').classList.contains('nav-open'));
   await page.waitForTimeout(300);

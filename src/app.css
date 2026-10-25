@@ -576,4 +576,7 @@ details.manual[open] summary{border-bottom:1px solid var(--line)}
   .note>span{flex:1 1 200px}
   .note .btn{margin-left:30px}
 }
+/* iPhones zoom in on any text box with text under 16px */
+.web .inp,.web .sel{font-size:16px}
+.phone-link .qr{max-width:150px;margin-top:10px}
 @media (forced-colors:active){.dogcard,details.manual{border:1px solid CanvasText}.tabbar{border-top:1px solid CanvasText}.tabbar button[aria-current]{outline:2px solid Highlight}}

@@ -9,11 +9,9 @@ const DOC_EXT = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'p
 const framed = (() => { try { return window.top !== window.self; } catch (e) { return true; } })();
 if (framed) { document.body.textContent = 'Open K-9 Salon in its own browser tab.'; throw new Error('K-9 Salon can’t run inside another page.'); }
 
-// A connection link (from the code shown on the computer) is read once and taken out of the address bar straight away.
-let LINK = null;
-if (/(^#|&)k=/.test(location.hash)) {
-  LINK = location.hash.slice(1);
-  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
+// The app never takes a key from its address. If one is ever put there, it's taken out of the address bar straight away.
+if (/(^#|[&?])k=/.test(location.hash + location.search)) {
+  try { history.replaceState(null, '', location.pathname); } catch (e) { location.hash = ''; }
 }
 
 function readPrefs() {
@@ -152,7 +150,6 @@ window.k9 = {
   onSerialPorts: () => {},
   serialChoose: async () => {},
   /* phone only */
-  takeLink: () => { const l = LINK; LINK = null; return l; },
   device: () => ({ ios, standalone: standalone(), canInstall: !!installEvent, touch: !!(window.matchMedia && matchMedia('(pointer: coarse)').matches) }),
   onDevice: cb => { deviceWatchers.push(cb); },
   install: async () => {

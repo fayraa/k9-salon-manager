@@ -104,8 +104,13 @@ ${body}<script src="k9-web.js${v}"></script><script src="app.js${v}"></script>
 </body>
 </html>
 `);
-  const files = ['./', `k9-web.js${v}`, `app.js${v}`, `app.css${v}`, `fonts.css${v}`, 'manifest.webmanifest', ...FONT_FILES.map(f => `fonts/${f}`), ...icons.map(f => `icons/${f}`)];
-  fs.writeFileSync(out('sw.js'), fs.readFileSync(src('web/sw.js'), 'utf8').replace("'__VERSION__'", JSON.stringify(VERSION)).replace('__FILES__', JSON.stringify(files)));
+  // the service worker keeps these, and checks each against its fingerprint before using a kept copy
+  const sha = f => require('crypto').createHash('sha256').update(fs.readFileSync(out(f))).digest('hex');
+  const files = { './': sha('index.html'), [`k9-web.js${v}`]: sha('k9-web.js'), [`app.js${v}`]: sha('app.js'), [`app.css${v}`]: sha('app.css'), [`fonts.css${v}`]: sha('fonts.css'), 'manifest.webmanifest': sha('manifest.webmanifest') };
+  FONT_FILES.forEach(f => { files[`fonts/${f}`] = sha(`fonts/${f}`); });
+  icons.forEach(f => { files[`icons/${f}`] = sha(`icons/${f}`); });
+  const later = { [`vendor/jsQR.js${v}`]: sha('vendor/jsQR.js') }; // kept once used
+  fs.writeFileSync(out('sw.js'), fs.readFileSync(src('web/sw.js'), 'utf8').replace("'__VERSION__'", JSON.stringify(VERSION)).replace('__FILES__', JSON.stringify(files)).replace('__LATER__', JSON.stringify(later)));
   console.log(`phone version built from ${shell.count} modules into web/`);
 }
 console.log(`renderer built from ${app.count} modules (${(app.js.length / 1024).toFixed(0)} KB)`);

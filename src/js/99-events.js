@@ -117,10 +117,12 @@ if (PHONE_MQ && PHONE_MQ.addEventListener) PHONE_MQ.addEventListener('change', (
   window.k9.onUpdate(onUpdateState);
   window.k9.onSerialPorts(chooseSerialPort);
   window.k9.getUpdateState().then(onUpdateState).catch(() => {});
-  if (window.k9.onDevice) window.k9.onDevice(() => { renderBanners(); if (S.view === 'settings' && !OV.length) { const y = $('#main').scrollTop; renderView(); $('#main').scrollTop = y; } });
+  if (window.k9.onDevice) window.k9.onDevice(() => {
+    renderBanners();
+    // Settings shows an Add to home screen button; don't redraw it under someone who is typing
+    const a = document.activeElement, typing = a && $('#view').contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName);
+    if (S.view === 'settings' && !OV.length && !typing) { const y = $('#main').scrollTop; renderView(); $('#main').scrollTop = y; }
+  });
   connect();
   if (S.prefs.scanner.serial) serialConnect(false);
-  // the phone version opened from the code on the computer: offer to connect
-  const link = window.k9.takeLink ? window.k9.takeLink() : null;
-  if (link) handleConnectLink(link);
 })();

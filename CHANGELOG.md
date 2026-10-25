@@ -4,14 +4,15 @@
 
 **New**
 - **Phone version**: K-9 Salon on iPhone and Android, from the phone's home screen. It uses the same sheet through the same bridge, so phones and computers always show the same records. No app store and no install file.
-- **Connect a phone by scanning a code**: in the Windows app, **Settings → Use on a phone → Show the code**. The phone shows the sheet's name and asks before connecting. The code hides itself after 3 minutes or when you leave Settings.
-- Laid out for a phone: dogs and records as cards, the main sections along the bottom, forms and dog profiles full screen.
+- **Connect a phone by scanning a code**: in the Windows app, **Settings → Use on a phone** shows a code that opens the phone version, and a connection code to scan from inside it. The phone shows the sheet's name and asks before connecting. The connection code hides itself after 3 minutes or when you leave Settings.
+- Laid out for a phone: dogs and records as cards, the main sections along the bottom, forms and dog profiles full screen. The phone's Back button closes what's open.
 - **Take a photo** of a document straight from Add a document. Several pages become one PDF, as on the computer.
 - **PDFs on the phone**: the health record, monthly summary and due list are made on the phone, then shared (email, WhatsApp, Files, print) or saved.
 - Bluetooth chip scanners that type like a keyboard work on the phone.
 
 **Also**
 - The sections menu in a narrow window can't be reached with Tab while it's closed, and keeps the focus inside while it's open.
+- Reconnecting to another sheet while a reload was still on its way no longer shows the old sheet's records.
 
 The bridge script doesn't change. To publish the phone version, turn on GitHub Pages once (see the README).
 

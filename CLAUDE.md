@@ -34,7 +34,9 @@ app ("the bridge", `apps-script/K9AppBridge.gs`).
   `src/js/00-core.js` (the app then suggests the update). Bump `NEED_BRIDGE` only when the app can't work without it.
 - Keep UI text plain and short. Keep keyboard access, focus handling and the high-contrast mode working.
 - The phone version keeps only its connection and display settings on the phone. Never cache records or documents
-  in the browser. A connection link (`#s=…&k=…`) is read once and removed from the address bar at load.
+  in the browser; the service worker keeps only the app's own files, each checked against its build fingerprint.
+  The connection code is plain text (`K9SALON:1:…`) read by the in-app scanner, never a link, so the key stays out
+  of browser history. A key put in the address is removed at load and never used.
 - Anything the phone can't do (serial scanners, updating the bridge, printing straight to a PDF file) is hidden or
   explained when `WEB` is true; check new features at phone width (390 px) as well as on the desktop.
 

@@ -8,9 +8,9 @@ Google Sheet, so the sheet stays the single source of truth and anyone with acce
 Windows may say it protected your PC because the installer isn't code-signed: choose **More info → Run anyway**.
 It installs for your Windows user only and adds Start menu and desktop shortcuts. After that, the app updates itself.
 
-**On a phone:** open **Settings → Use on a phone** in the Windows app and scan the code with the phone's camera.
-The phone version opens at [fayraa.github.io/k9-salon-manager](https://fayraa.github.io/k9-salon-manager/) and can
-be added to the home screen. See [Phone version](#phone-version).
+**On a phone:** open **Settings → Use on a phone** in the Windows app and follow the three steps there.
+The phone version is at [fayraa.github.io/k9-salon-manager](https://fayraa.github.io/k9-salon-manager/) and sits on the
+phone's home screen. See [Phone version](#phone-version).
 
 ## What it does
 - **Home**: what needs attention (licences, annual checks, vaccinations, parasite treatments, breeding limits,
@@ -37,16 +37,17 @@ The same app, laid out for a phone, published as a web page from this repository
 iPhone and Android and can sit on the home screen like an app. It talks to the same bridge, so the phone and the
 computer always show the same records.
 
-**Connecting a phone** (once per phone):
-1. In the Windows app, open **Settings → Use on a phone** and choose **Show the code**.
-2. Scan it with the phone's camera. The phone version opens, shows the sheet's name and asks to connect.
-   Type your name so the change history shows who saved what.
-3. Add it to the home screen. iPhone: **Share → Add to Home Screen**. Android: **Add** when offered,
+**Connecting a phone** (once per phone), from **Settings → Use on a phone** in the Windows app:
+1. Scan the first code with the phone's camera (or type the address). The phone version opens.
+2. Add it to the home screen. iPhone: **Share → Add to Home Screen**. Android: **Add** when offered,
    or **⋮ → Add to Home screen**.
-4. On an iPhone, open it from the home screen and tap **Scan the code** once more: iPhone keeps home screen apps
-   separate from Safari.
+3. Open it from the home screen, tap **Scan the code**, and point it at the **connection code** (choose
+   **Show the connection code** on the computer). The phone shows the sheet's name and asks before connecting.
+   Type your name so the change history shows who saved what.
 
-Or enter the web app URL and access key by hand under **Enter the web app URL and access key instead**.
+The connection code is plain text, not a link, so only the app's own scanner uses it and it never ends up in a
+browser's history. Or enter the web app URL and access key by hand under
+**Enter the web app URL and access key instead**.
 
 **What's different on a phone**
 - Dogs and records show as cards; Home, Dogs, Breeding and Records sit along the bottom, with the rest under **More**.
@@ -57,10 +58,12 @@ Or enter the web app URL and access key by hand under **Enter the web app URL an
 - The phone keeps only its connection and display settings. Records always come from the bridge, and documents
   are fetched when opened, not stored on the phone.
 
-**Keep it safe.** Anyone with the connection (from the code, or the URL and key) can read and change the records,
-so show the code only to your own staff and keep phones locked. To cut off a lost phone, run `resetAppKey` in the
-bridge and reconnect the other phones and computers. GitHub Pages sites from the same GitHub account share
-browser storage, so don't publish other Pages sites from this account (or give this one its own domain).
+**Keep it safe.** Anyone with the connection (from the connection code, or the URL and key) can read and change the
+records, so show the code only to your own staff and keep phones locked. To cut off a lost phone, run `resetAppKey`
+in the bridge and reconnect the other phones and computers.
+Every GitHub Pages site published from the same GitHub account shares one web address (fayraa.github.io), and with
+it the browser's storage: another Pages site from this account could read a phone's connection. Keep this the only
+Pages site on the account, or give it its own domain (and set `k9.phoneUrl` in `package.json` to match).
 
 **Publishing it** (once): in the repository's **Settings → Pages**, set **Source** to **GitHub Actions**. After that,
 every release also publishes the phone version, and it updates itself the next time it opens. To publish without a
