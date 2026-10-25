@@ -402,7 +402,11 @@ test('documents on a phone: camera photos become one PDF, a single photo stays a
 test('the phone layout fits: no sideways scrolling on any screen, with extra large text too', async () => {
   for (const textSize of [1, 1.3]) {
     const { page, ctx, errors } = await openPhone({ context: { viewport: { width: 360, height: 740 } }, prefs: { url: BRIDGE, key: KEY, who: 'Sam Tester', textSize } });
-    const fits = async where => { const r = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1, main: document.querySelector('#main').scrollWidth <= document.querySelector('#main').clientWidth + 1 })); assert.ok(r.doc && r.main, `${where} fits at text size ${textSize}`); };
+    const fits = async where => {
+      const r = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1, main: document.querySelector('#main').scrollWidth <= document.querySelector('#main').clientWidth + 1, tall: document.documentElement.scrollHeight <= document.documentElement.clientHeight + 1 }));
+      assert.ok(r.doc && r.main, `${where} fits at text size ${textSize}`);
+      assert.ok(r.tall, `${where}: no empty space to scroll into below the page`);
+    };
     await fits('home');
     for (const v of ['dogs', 'breeding', 'records']) { await page.click(`#tabbar [data-view="${v}"]`); await fits(v); }
     await page.click('[data-action="nav"][data-tab="Vaccinations"]'); await fits('a record list');

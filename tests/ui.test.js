@@ -1025,3 +1025,20 @@ test('Use on a phone: a code that opens the phone version, and a connection code
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('every page scrolls only as far as its content, with no empty space below', async () => {
+  const { page, errors, ctx } = await openApp();
+  for (const v of ['home', 'dogs', 'breeding', 'records', 'reports', 'settings']) {
+    await page.click(`.nav button[data-view="${v}"]`);
+    await page.waitForTimeout(150);
+    const r = await page.evaluate(() => {
+      const main = document.querySelector('#main'), view = document.querySelector('#view');
+      const last = Math.max(...[...view.querySelectorAll('*')].map(el => el.getBoundingClientRect().bottom)) + main.scrollTop - main.getBoundingClientRect().top;
+      return { window: document.documentElement.scrollHeight - document.documentElement.clientHeight, below: main.scrollHeight - last, pad: parseFloat(getComputedStyle(view).paddingBottom) };
+    });
+    assert.ok(r.window <= 0, `${v}: the window itself doesn't scroll (${r.window}px)`);
+    assert.ok(r.below <= r.pad + 1, `${v}: ${r.below}px below the last item`);
+  }
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
