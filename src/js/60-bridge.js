@@ -41,6 +41,16 @@ async function sendWrite(payload, opId) {
   }
   return res;
 }
+/** True when the next press must reuse the same opId: Google didn't confirm, or the first press still held the lock. */
+const keepOpAfter = e => !!(e && (e.keepOp || e.code === 'locked'));
+/** The first press already saved (without the latest edits): close instead of offering to save a second copy. */
+function savedBefore(e) {
+  if (!e || e.code !== 'changed_after_save') return false;
+  closeTop(true);
+  toast(e.userMessage || DESK_COPY.changed_after_save, true);
+  scheduleRefresh(300);
+  return true;
+}
 function skippedNote(list) {
   const names = Array.from(new Set((list || []).filter(Boolean)));
   if (names.length) toast(`Not saved because the sheet works ${names.length === 1 ? 'it' : 'them'} out: ${names.join(', ')}.`, true);
@@ -131,7 +141,7 @@ async function saveRow(job, changes) {
   const prev = S.conn.state; S.conn.state = 'saving'; renderSync();
   let res;
   try { res = await sendWrite({ action: 'save', tab: job.tab, mode: job.mode, row: job.row ? job.row.r : null, changes: out, expect, dog: job.dog || '' }, job.opId); }
-  catch (e) { if (!e.keepOp) job.opId = null; throw e; }
+  catch (e) { if (!keepOpAfter(e)) job.opId = null; throw e; }
   finally { S.saving = false; S.conn.state = prev === 'saving' ? 'live' : prev; renderSync(); }
   job.opId = null;
   skippedNote(res.skipped);

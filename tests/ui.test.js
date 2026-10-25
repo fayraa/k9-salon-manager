@@ -414,6 +414,74 @@ test('a save Google didn’t confirm can be pressed again without saving twice',
   await ctx.close();
 });
 
+test('a retry that finds the first save still running keeps the same ID, so it can’t add the rows twice', async () => {
+  const { page, errors, ctx, calls } = await openApp();
+  await page.click('.qa-btn[data-action="bulk"]');
+  await page.waitForSelector('#bk-list .bk-dog');
+  await page.selectOption('#bk-breed', 'MALTESE');
+  await page.click('[data-bk="all"]');
+  await page.click('#bk-save');
+  await page.evaluate(() => { window.__k9.failNext = 'timeout'; });
+  await page.click('#bk-save');
+  await page.waitForFunction(() => /won’t be saved twice/.test(document.querySelector('#bk-msg').textContent));
+  await page.evaluate(() => { window.__k9.failNext = 'locked'; });
+  await page.click('#bk-save');
+  await page.waitForFunction(() => /still running/.test(document.querySelector('#bk-msg').textContent));
+  assert.equal(await page.textContent('#bk-save'), 'Save again');
+  await page.click('#bk-save');
+  await page.waitForSelector('.toast');
+  const batches = (await calls()).filter(c => c.action === 'batch');
+  assert.equal(batches.length, 3);
+  assert.equal(new Set(batches.map(b => b.opId)).size, 1, 'every press used the same ID');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('bulk rows already saved before the latest edits aren’t offered for saving again', async () => {
+  const { page, errors, ctx, calls } = await openApp();
+  await page.click('.qa-btn[data-action="bulk"]');
+  await page.waitForSelector('#bk-list .bk-dog');
+  await page.selectOption('#bk-breed', 'MALTESE');
+  await page.click('[data-bk="all"]');
+  await page.click('#bk-save');
+  await page.evaluate(() => { window.__k9.failNext = 'timeout'; });
+  await page.click('#bk-save');
+  await page.waitForFunction(() => /won’t be saved twice/.test(document.querySelector('#bk-msg').textContent));
+  await page.evaluate(() => { window.__k9.failNext = 'changed_after_save'; });
+  await page.click('#bk-save');
+  await page.waitForFunction(() => !document.querySelector('#bk-save'));
+  assert.match(await page.textContent('.toasts'), /already saved a moment ago/);
+  const batches = (await calls()).filter(c => c.action === 'batch');
+  assert.equal(batches.length, 2, 'no third press is possible, so no second copy');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('a single new record keeps its ID after “still running”, and closes once it turns out it was already saved', async () => {
+  const { page, errors, ctx, calls } = await openApp();
+  await page.click('.nav button[data-view="dogs"]');
+  await page.fill('#dog-q', 'Pepper');
+  await page.click('#dog-table tbody tr');
+  await page.click('.drawer [data-tab="Daily Health Monitoring"]');
+  await page.waitForSelector('form.mcard');
+  await page.evaluate(() => { window.__k9.failNext = 'timeout'; });
+  await page.click('#form-save');
+  await page.waitForFunction(() => /won’t be saved twice/.test(document.querySelector('#form-msg').textContent));
+  await page.evaluate(() => { window.__k9.failNext = 'locked'; });
+  await page.click('#form-save');
+  await page.waitForFunction(() => /still running/.test(document.querySelector('#form-msg').textContent));
+  assert.equal(await page.textContent('#form-save'), 'Save again');
+  await page.evaluate(() => { window.__k9.failNext = 'changed_after_save'; });
+  await page.click('#form-save');
+  await page.waitForFunction(() => !document.querySelector('#form-save'));
+  assert.match(await page.textContent('.toasts'), /already saved a moment ago/);
+  const saves = (await calls()).filter(c => c.action === 'save');
+  assert.equal(saves.length, 3);
+  assert.equal(new Set(saves.map(s => s.opId)).size, 1, 'every press used the same ID');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 /** The test kennel plus extra active dogs that have no kennel yet. */
 function bigHerd(extra) {
   const res = readResponse({ version: 3 });
