@@ -70,6 +70,7 @@ function openDocAdd(chip, id, type) {
   if (!d.id && !d.chip) { toast('Give this dog an animal ID or a microchip number first.', true); return; }
   const opt = k => `<option value="${esc(k.t)}" ${k.t === type ? 'selected' : ''}>${esc(k.t)}</option>`;
   const from = originOf(d);
+  const touch = WEB && !!device().touch; // phones get a button that opens the camera straight away
   const o = modal('doc', {
     title: 'Add a document', form: true,
     sub: `For ${esc(dogLabel(d))}. Saved in your Google Drive, in the “K-9 Salon Dog Documents” folder.`,
@@ -80,9 +81,9 @@ function openDocAdd(chip, id, type) {
       <div class="field" id="dc-link-f"><label for="dc-link">Goes with</label><select class="sel" id="dc-link"></select><span class="hint">Its link is added to that record in the sheet.</span></div>
       <div class="field wide"><label for="dc-note">Note</label><input class="inp" id="dc-note" maxlength="300" autocomplete="off" placeholder="For example: booster, page 2 of 3"></div>
       <div class="field wide"><span class="flabel" id="dc-file-l">File</span>
-        <div class="drop" id="dc-drop"><span>Drop a PDF or photos here, or</span><label class="btn sm" for="dc-file">${icon('plus')}Choose files</label><input type="file" id="dc-file" class="sr" accept="application/pdf,image/jpeg,image/png,image/webp" multiple aria-labelledby="dc-file-l"></div>
+        <div class="drop" id="dc-drop">${touch ? `<label class="btn sm" for="dc-cam">${icon('camera')}Take a photo</label><input type="file" id="dc-cam" class="sr" accept="image/*" capture="environment" aria-label="Take a photo of the document">` : '<span>Drop a PDF or photos here, or</span>'}<label class="btn sm" for="dc-file">${icon('plus')}${touch ? 'Choose a PDF or photos' : 'Choose files'}</label><input type="file" id="dc-file" class="sr" accept="application/pdf,image/jpeg,image/png,image/webp" multiple aria-labelledby="dc-file-l"></div>
         <div class="dc-files" id="dc-files" aria-live="polite"></div>
-        <span class="hint">One PDF, or one or more photos. Several photos are saved together as one PDF, a page each.</span></div>
+        <span class="hint">${touch ? 'Take a photo of each page, or choose one PDF.' : 'One PDF, or one or more photos.'} Several photos are saved together as one PDF, a page each.</span></div>
     </div>`,
     foot: `<span class="msg" id="dc-msg" aria-live="polite"></span><button type="button" class="btn" data-action="close-top">Cancel</button><button type="submit" class="btn primary" id="dc-save">Save document</button>`,
     guard: () => formGuard(o),
@@ -118,7 +119,7 @@ function openDocAdd(chip, id, type) {
   $('#dc-date', o.el).addEventListener('change', matchDate);
   $('#dc-link', o.el).addEventListener('change', () => { o.linkTouched = true; });
   form.addEventListener('input', () => { o.job.dirty = true; });
-  $('#dc-file', o.el).addEventListener('change', e => { docPick(o, Array.from(e.target.files || [])); e.target.value = ''; });
+  $$('#dc-file, #dc-cam', o.el).forEach(inp => inp.addEventListener('change', e => { docPick(o, Array.from(e.target.files || [])); e.target.value = ''; }));
   const drop = $('#dc-drop', o.el);
   ['dragenter', 'dragover'].forEach(ev => o.el.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach(ev => o.el.addEventListener(ev, e => { e.preventDefault(); if (ev === 'drop' || !o.el.contains(e.relatedTarget)) drop.classList.remove('over'); }));
@@ -241,6 +242,7 @@ async function openDocFile(id, btn) {
   const res = await window.k9.docOpen({ id, name: x.name, mime: x.mime }).catch(() => null);
   if (btn) btn.disabled = false;
   if (!res || !res.ok) toast(res && res.error === 'network' ? 'Couldn’t reach Google. Check the internet connection, then try again.' : 'Couldn’t open it here. Try the Google Drive button next to it.', true);
+  else if (res.blob) offerFile(res.blob, res.name, `${x.type}${x.dog ? ` · ${x.dog}` : ''}`); // the phone version shows it here
 }
 function askDocRemove(id) {
   const x = (S.docs || []).find(y => y.id === id);

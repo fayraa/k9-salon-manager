@@ -8,6 +8,10 @@ Google Sheet, so the sheet stays the single source of truth and anyone with acce
 Windows may say it protected your PC because the installer isn't code-signed: choose **More info → Run anyway**.
 It installs for your Windows user only and adds Start menu and desktop shortcuts. After that, the app updates itself.
 
+**On a phone:** open **Settings → Use on a phone** in the Windows app and scan the code with the phone's camera.
+The phone version opens at [fayraa.github.io/k9-salon-manager](https://fayraa.github.io/k9-salon-manager/) and can
+be added to the home screen. See [Phone version](#phone-version).
+
 ## What it does
 - **Home**: what needs attention (licences, annual checks, vaccinations, parasite treatments, breeding limits,
   sterilisation of retired dogs) and what's coming up (due dates, expected whelpings, heats, training refreshers).
@@ -24,8 +28,43 @@ It installs for your Windows user only and adds Start menu and desktop shortcuts
   a due list, change history, and a herd summary.
 - **Chip scanners**: keyboard-style USB scanners work anywhere; serial (COM port) scanners connect in Settings.
 - **Reminders**: an optional daily email and a Windows notification.
+- **Phone version**: the same app on iPhone and Android, from the home screen, connected by scanning a code.
 - **Accessible**: large text sizes, high contrast, light and dark colours, and full keyboard use
   (Ctrl+K to find anything, Ctrl + and Ctrl − for text size, Ctrl+R to reload).
+
+## Phone version
+The same app, laid out for a phone, published as a web page from this repository (GitHub Pages). It works on
+iPhone and Android and can sit on the home screen like an app. It talks to the same bridge, so the phone and the
+computer always show the same records.
+
+**Connecting a phone** (once per phone):
+1. In the Windows app, open **Settings → Use on a phone** and choose **Show the code**.
+2. Scan it with the phone's camera. The phone version opens, shows the sheet's name and asks to connect.
+   Type your name so the change history shows who saved what.
+3. Add it to the home screen. iPhone: **Share → Add to Home Screen**. Android: **Add** when offered,
+   or **⋮ → Add to Home screen**.
+4. On an iPhone, open it from the home screen and tap **Scan the code** once more: iPhone keeps home screen apps
+   separate from Safari.
+
+Or enter the web app URL and access key by hand under **Enter the web app URL and access key instead**.
+
+**What's different on a phone**
+- Dogs and records show as cards; Home, Dogs, Breeding and Records sit along the bottom, with the rest under **More**.
+- **Take a photo** in Add a document opens the camera; several photos of one record become one PDF.
+- PDFs (health record, monthly summary, due list) are made on the phone and handed over with **Share** or **Save**.
+- Bluetooth chip scanners that type like a keyboard work; serial (COM port) scanners need the Windows app.
+- The bridge script is set up and updated from a computer.
+- The phone keeps only its connection and display settings. Records always come from the bridge, and documents
+  are fetched when opened, not stored on the phone.
+
+**Keep it safe.** Anyone with the connection (from the code, or the URL and key) can read and change the records,
+so show the code only to your own staff and keep phones locked. To cut off a lost phone, run `resetAppKey` in the
+bridge and reconnect the other phones and computers. GitHub Pages sites from the same GitHub account share
+browser storage, so don't publish other Pages sites from this account (or give this one its own domain).
+
+**Publishing it** (once): in the repository's **Settings → Pages**, set **Source** to **GitHub Actions**. After that,
+every release also publishes the phone version, and it updates itself the next time it opens. To publish without a
+release, run the **Phone version** workflow from the Actions tab.
 
 ## Connecting to your sheet (once)
 The app talks to your sheet through a small Google Apps Script "bridge" that runs in your own Google account.
@@ -55,13 +94,13 @@ See [CLAUDE.md](CLAUDE.md) for the layout, commands and rules. In short:
 npm ci
 npx playwright install --with-deps chromium
 npm run check      # build + syntax checks
-npm test           # bridge, scanner and UI tests
+npm test           # bridge, scanner, QR code, desktop and phone tests
 npm start          # run the app
 npm run dist       # Windows app + installer (needs makensis)
 ```
 
 Releases are built by GitHub Actions when the version in `package.json` changes on `main`. Installed apps check
 `releases/latest/download/latest.json`, download the installer, verify its SHA-256 and install it silently
-when you choose to restart.
+when you choose to restart. The same release publishes `web/` (the phone version) to GitHub Pages.
 
 The repository holds no kennel data, sheet IDs, URLs or keys. Test data is made up.

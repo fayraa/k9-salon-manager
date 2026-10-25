@@ -1,7 +1,7 @@
 {
   "name": "k9-salon-manager",
   "productName": "K-9 Salon Manager",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Kennel records for K-9 Salon, synced with Google Sheets",
   "author": "K-9 Salon",
   "main": "main.js",
@@ -9,9 +9,9 @@
   "scripts": {
     "start": "node scripts/build.js && electron .",
     "build": "node scripts/build.js",
-    "check": "node scripts/build.js && node --check renderer/app.js && node --check main.js && node --check preload.js && node scripts/check-gs.js",
-    "test:unit": "node --test tests/bridge.test.js tests/scanner.test.js",
-    "test:ui": "node scripts/build.js && node --test tests/ui.test.js",
+    "check": "node scripts/build.js && node --check renderer/app.js && node --check web/app.js && node --check web/k9-web.js && node --check web/sw.js && node --check main.js && node --check preload.js && node scripts/check-gs.js",
+    "test:unit": "node --test tests/bridge.test.js tests/scanner.test.js tests/qr.test.js",
+    "test:ui": "node scripts/build.js && node --test --test-concurrency=1 tests/ui.test.js tests/web.test.js",
     "test": "npm run test:unit && npm run test:ui",
     "dist:dir": "node scripts/build.js && electron-builder --win dir --x64 --publish never",
     "dist": "npm run dist:dir && node scripts/make-installer.js && node scripts/release-info.js"
@@ -21,6 +21,7 @@
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "electron": "^44.9.0",
     "electron-builder": "^26.15.3",
+    "jsqr": "1.4.0",
     "playwright": "1.56.0",
     "resedit": "^3.1.0"
   },
@@ -58,6 +59,7 @@
     "url": "https://github.com/fayraa/k9-salon-manager.git"
   },
   "k9": {
-    "repo": "fayraa/k9-salon-manager"
+    "repo": "fayraa/k9-salon-manager",
+    "phoneUrl": "https://fayraa.github.io/k9-salon-manager/"
   }
 }

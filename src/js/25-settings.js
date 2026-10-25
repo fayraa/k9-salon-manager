@@ -17,17 +17,18 @@ function viewSettings() {
   const u = S.update;
   const upText = { idle: 'Not checked yet', checking: 'Checking…', none: `You have the latest version`, available: `Version ${u.version} found, downloading…`, downloading: `Downloading version ${u.version}… ${u.progress || 0}%`, ready: `Version ${u.version} is ready to install`, error: u.message || 'Couldn’t check for updates', unsupported: 'Automatic updates work in the installed Windows app', disabled: 'Updates aren’t set up for this copy' }[u.state] || '';
   const sc = S.scanner;
+  const sections = [['you', 'You'], ['display', 'Display'], ['checks', 'Checks'], ['rules', 'Breeding rules'], ['reminders', 'Reminders'], ['scanner', 'Chip scanner'], ['connection', 'Connection'], ...(WEB ? [] : [['phone', 'Use on a phone']]), ['updates', WEB ? 'About' : 'Updates']];
   return `<div class="settings">
-  <nav class="set-nav" aria-label="Settings sections">${[['you', 'You'], ['display', 'Display'], ['checks', 'Checks'], ['rules', 'Breeding rules'], ['reminders', 'Reminders'], ['scanner', 'Chip scanner'], ['connection', 'Connection'], ['updates', 'Updates']].map(([k, l]) => `<a href="#set-${k}">${l}</a>`).join('')}</nav>
+  <nav class="set-nav" aria-label="Settings sections">${sections.map(([k, l]) => `<a href="#set-${k}">${l}</a>`).join('')}</nav>
   <div class="set-body">
   <section class="set" id="set-you"><h2>You</h2>
-    <div class="field"><label for="p-who">Your name</label><input class="inp" id="p-who" value="${esc(P.who)}" placeholder="For example Austin" autocomplete="name"><span class="hint">Shown in the change history and on AVS submissions you log. Each computer keeps its own name.</span></div>
+    <div class="field"><label for="p-who">Your name</label><input class="inp" id="p-who" value="${esc(P.who)}" placeholder="For example Austin" autocomplete="name"><span class="hint">Shown in the change history and on AVS submissions you log. Each phone and computer keeps its own name.</span></div>
   </section>
 
   <section class="set" id="set-display"><h2>Display</h2>
-    <div class="field"><span class="flabel" id="lbl-size">Text size</span>${radios('p-size', TEXT_SIZES, P.textSize)}<span class="hint">Ctrl + and Ctrl − also change it. Ctrl 0 resets it.</span></div>
+    <div class="field"><span class="flabel" id="lbl-size">Text size</span>${radios('p-size', TEXT_SIZES, P.textSize)}${WEB ? '' : '<span class="hint">Ctrl + and Ctrl − also change it. Ctrl 0 resets it.</span>'}</div>
     <div class="field"><span class="flabel">Contrast</span>${radios('p-contrast', [['normal', 'Normal'], ['high', 'High contrast']], P.contrast)}<span class="hint">High contrast uses darker text and stronger outlines.</span></div>
-    <div class="field"><span class="flabel">Colours</span>${radios('p-theme', [['system', 'Match Windows'], ['light', 'Light'], ['dark', 'Dark']], P.theme)}</div>
+    <div class="field"><span class="flabel">Colours</span>${radios('p-theme', [['system', WEB ? 'Match this device' : 'Match Windows'], ['light', 'Light'], ['dark', 'Dark']], P.theme)}</div>
   </section>
 
   <section class="set" id="set-checks"><h2>Checks</h2>${lockNote}
@@ -61,12 +62,14 @@ function viewSettings() {
     </div>
     <div class="row"><button class="btn primary" data-action="save-shared" data-part="reminders" ${can ? '' : 'disabled'}>Save reminders</button><button class="btn" data-action="digest-test" ${can ? '' : 'disabled'}>Send a test email now</button></div>
     ${S.reminders.installed ? '<p class="muted small">The daily email is scheduled.</p>' : ''}
-    <hr>
-    ${toggle('p-notify', 'Windows notification', P.notify, 'When you open the app each day, show a notification if anything is overdue or due today')}
+    ${WEB ? '' : `<hr>
+    ${toggle('p-notify', 'Windows notification', P.notify, 'When you open the app each day, show a notification if anything is overdue or due today')}`}
   </section>
 
   <section class="set" id="set-scanner"><h2>Chip scanner</h2>
-    <p class="muted">Scanners that type like a keyboard work anywhere in the app with no setup: scan a microchip and that dog opens, or the number fills the box you’re typing in.</p>
+    ${WEB ? `<p class="muted">Pair a Bluetooth scanner that types like a keyboard with this phone (in the phone’s Bluetooth settings). Then scan a microchip and that dog opens, or the number fills the box you’re typing in.</p>
+    <p class="muted small" id="scan-last">${S.lastScan ? `Last scan: <span class="chip">${esc(S.lastScan)}</span>` : ''}</p>
+  </section>` : `<p class="muted">Scanners that type like a keyboard work anywhere in the app with no setup: scan a microchip and that dog opens, or the number fills the box you’re typing in.</p>
     <h3>Serial (COM port) scanner</h3>
     <p class="muted">For a reader that connects as a COM port, such as an ESP32 with a 134.2 kHz FDX-B module. The app reads the 15-digit number from each line it sends.</p>
     <div class="scan-status"><span class="dot ${sc.state === 'on' ? 'ok' : sc.state === 'error' ? 'crit' : ''}" aria-hidden="true"></span><span>${esc(sc.state === 'on' ? `Connected to ${sc.name || 'scanner'}` : sc.state === 'error' ? sc.msg || 'Not connected' : sc.state === 'connecting' ? 'Connecting…' : 'Not connected')}</span></div>
@@ -75,22 +78,25 @@ function viewSettings() {
     </div>
     <div class="row">${sc.state === 'on' ? '<button class="btn" data-action="serial-off">Disconnect</button>' : '<button class="btn primary" data-action="serial-on">Connect a serial scanner</button>'}</div>
     <p class="muted small" id="scan-last">${S.lastScan ? `Last scan: <span class="chip">${esc(S.lastScan)}</span>` : ''}</p>
-  </section>
+  </section>`}
 
   <section class="set" id="set-connection"><h2>Connection</h2>
     <dl class="kv"><dt>Status</dt><dd>${esc(S.conn.state === 'live' ? `Connected · synced at ${clock(S.conn.at)}` : S.conn.state === 'setup' ? 'Not connected yet' : S.conn.msg || 'Connecting…')}</dd>
     <dt>Spreadsheet</dt><dd>${S.sheetUrl ? `<a href="${esc(S.sheetUrl)}" target="_blank" rel="noopener">${esc(S.sheetTitle || 'Open in Google Sheets')}</a>` : '—'}</dd>
     <dt>Bridge script</dt><dd>${S.bridgeVersion ? `Version ${S.bridgeVersion}${S.bridgeVersion < NEED_BRIDGE ? ' · <b>update needed</b>' : S.bridgeVersion < BRIDGE_LATEST ? ' · <b>update available</b>' : ' · up to date'}` : '—'}</dd>
-    <dt>Refresh</dt><dd>Every 2 minutes, after each save, and with Ctrl+R</dd></dl>
+    <dt>Refresh</dt><dd>${WEB ? 'Every 2 minutes, after each save, and with the reload button at the top' : 'Every 2 minutes, after each save, and with Ctrl+R'}</dd></dl>
     ${connFields(P, 'conn-form')}
-    <div class="row"><button class="btn" data-action="reload">${icon('sync')}Reload now</button><button class="btn" data-action="copy-script">${icon('copy')}Copy bridge script</button><button class="btn" data-action="bridge-help">How to update the bridge</button></div>
+    <div class="row"><button class="btn" data-action="reload">${icon('sync')}Reload now</button>${WEB ? `<button class="btn" data-action="scan-connect">${icon('camera')}Scan a connection code</button>` : `<button class="btn" data-action="copy-script">${icon('copy')}Copy bridge script</button><button class="btn" data-action="bridge-help">How to update the bridge</button>`}</div>
   </section>
-
-  <section class="set" id="set-updates"><h2>Updates</h2>
+  ${WEB ? '' : phoneSectionHTML()}
+  ${WEB ? `<section class="set" id="set-updates"><h2>About</h2>
+    <dl class="kv"><dt>This version</dt><dd>${esc(S.version || '—')}</dd><dt>Updates</dt><dd>${u.state === 'ready' ? `Version ${esc(u.version)} is ready` : 'The newest version loads each time the app opens'}</dd></dl>
+    <div class="row">${u.state === 'ready' ? '<button class="btn primary" data-action="update-install">Reload now</button>' : ''}${device().canInstall ? `<button class="btn" data-action="install-app">${icon('plus')}Add to home screen</button>` : ''}</div>
+  </section>` : `<section class="set" id="set-updates"><h2>Updates</h2>
     <dl class="kv"><dt>This version</dt><dd>${esc(S.version || '—')}</dd><dt>Status</dt><dd>${esc(upText)}</dd></dl>
     ${toggle('p-auto', 'Download updates automatically', P.autoUpdate, 'New versions download in the background. You choose when to restart.')}
     <div class="row"><button class="btn" data-action="update-check">${icon('sync')}Check for updates</button>${u.state === 'ready' ? '<button class="btn primary" data-action="update-install">Restart and update</button>' : ''}</div>
-  </section>
+  </section>`}
   </div></div>`;
 }
 function afterSettings() {
@@ -142,8 +148,8 @@ function mergeShared(x) {
 async function setPrefs(patch, msg) {
   S.prefs = Object.assign({}, S.prefs, patch);
   applyDisplay();
-  try { await window.k9.setPrefs(patch); if (msg) toast(msg); }
-  catch (e) { toast('Couldn’t save that setting on this computer.', true); }
+  try { const r = await window.k9.setPrefs(patch); if (r && r.ok === false) throw new Error(r.error); if (msg) toast(msg); }
+  catch (e) { toast(`Couldn’t save that setting on this ${WEB ? 'phone' : 'computer'}.`, true); }
 }
 function applyDisplay() {
   const root = document.documentElement;

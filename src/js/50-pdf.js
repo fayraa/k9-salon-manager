@@ -40,7 +40,8 @@ function pdfTable(cols, rows, empty = 'None recorded.') {
 async function savePdf(title, filename, body, sub) {
   toast('Preparing the PDF…');
   const res = await window.k9.pdf({ html: pdfDoc(title, body, sub), filename: filename.replace(/[\\/:*?"<>|]+/g, '-') }).catch(e => ({ ok: false, message: String(e.message || e) }));
-  if (res && res.ok) toast(`Saved ${res.name}. It’s open in your PDF viewer.`);
+  if (res && res.ok && res.blob) offerFile(res.blob, res.name, 'Your PDF is ready'); // the phone version hands the file over to share or save
+  else if (res && res.ok) toast(`Saved ${res.name}. It’s open in your PDF viewer.`);
   else if (!res || !res.cancelled) toast(`Couldn’t make the PDF: ${(res && res.message) || 'unknown error'}`, true);
 }
 

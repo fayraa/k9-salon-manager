@@ -982,3 +982,37 @@ test('documents: a list the bridge couldn’t read is reported, and nothing on t
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('Use on a phone shows a code that connects a phone, only when asked, and hides it when you leave', async () => {
+  const jsQR = require('jsqr');
+  const url = 'https://script.google.com/macros/s/AKfycbTEST0123456789/exec', key = 'k'.repeat(40);
+  const { page, errors, ctx } = await openApp({ prefs: { url, key } });
+  await page.click('.nav button[data-view="settings"]');
+  await page.waitForSelector('#set-phone');
+  assert.equal(await page.locator('svg.qr').count(), 0, 'the code isn’t shown until asked');
+  assert.match(await page.textContent('#set-phone'), /fayraa\.github\.io\/k9-salon-manager/);
+  await page.click('[data-action="phone-code"]');
+  await page.waitForSelector('svg.qr');
+  assert.match(await page.textContent('#set-phone'), /Anyone who scans this code/);
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.action), 'phone-code-hide', 'focus moves to Hide');
+  // read it back the way a phone camera would
+  const px = await page.evaluate(async () => {
+    const svg = document.querySelector('svg.qr');
+    const img = new Image();
+    img.src = 'data:image/svg+xml;base64,' + btoa(new XMLSerializer().serializeToString(svg));
+    await img.decode();
+    const c = document.createElement('canvas'); c.width = c.height = 400;
+    const g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, 400, 400);
+    return Array.from(g.getImageData(0, 0, 400, 400).data);
+  });
+  const read = jsQR(Uint8ClampedArray.from(px), 400, 400);
+  assert.equal(read && read.data, `https://fayraa.github.io/k9-salon-manager/#s=AKfycbTEST0123456789&k=${key}`);
+  await page.click('[data-action="phone-code-hide"]');
+  assert.equal(await page.locator('svg.qr').count(), 0);
+  await page.click('[data-action="phone-code"]');
+  await page.click('.nav button[data-view="home"]');
+  await page.click('.nav button[data-view="settings"]');
+  assert.equal(await page.locator('svg.qr').count(), 0, 'leaving Settings hides it');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

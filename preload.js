@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('k9', {
   copy: (text) => ipcRenderer.invoke('k9:copy', text),
   bridgeScript: () => ipcRenderer.invoke('k9:bridge-script'),
   version: () => ipcRenderer.invoke('k9:version'),
+  phoneUrl: () => ipcRenderer.invoke('k9:phone-url'),
   zoom: (factor) => ipcRenderer.invoke('k9:zoom', factor),
   focus: () => ipcRenderer.invoke('k9:focus'),
   photo: (id) => ipcRenderer.invoke('k9:photo', id),
