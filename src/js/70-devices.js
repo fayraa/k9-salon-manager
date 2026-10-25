@@ -129,7 +129,7 @@ function chooseSerialPort(list) {
 function onUpdateState(u) {
   const prev = S.update.state;
   S.update = Object.assign({}, u);
-  if (u.state === 'ready' && prev !== 'ready') toast(`Version ${u.version} has downloaded. Restart when you’re ready.`);
+  if (u.state === 'ready' && prev !== 'ready') toast(WEB ? `Version ${u.version} is ready. Reload to start using it.` : `Version ${u.version} has downloaded. Restart when you’re ready.`);
   if (u.state === 'error' && u.manual) toast(u.message || 'Couldn’t check for updates.', true);
   if (u.state === 'none' && u.manual) toast('You have the latest version.');
   if (!S.updateDismissed) renderBanners();

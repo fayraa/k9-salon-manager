@@ -14,6 +14,8 @@ const REPO = (pkg.k9 && pkg.k9.repo) || '';
 const UPDATE_FEED = REPO ? `https://github.com/${REPO}/releases/latest/download/latest.json` : '';
 const UPDATE_HOSTS = new Set(['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com', 'github-releases.githubusercontent.com']);
 const PREF_KEYS = ['url', 'key', 'who', 'textSize', 'contrast', 'theme', 'notify', 'autoUpdate', 'scanner', 'sheetId'];
+// where the phone version is published (GitHub Pages); the code shown in Settings opens it
+const PHONE_URL = /^https:\/\/[\w.-]+\/([\w.~-]+\/)*$/.test((pkg.k9 && pkg.k9.phoneUrl) || '') ? pkg.k9.phoneUrl : '';
 
 /* ---------- settings on this computer ---------- */
 const settingsPath = () => path.join(app.getPath('userData'), 'settings.json');
@@ -125,6 +127,7 @@ ipcMain.handle('k9:test', (event, input) => postToBridge(String((input && input.
 ipcMain.handle('k9:copy', (event, text) => { clipboard.writeText(String(text)); return true; });
 ipcMain.handle('k9:bridge-script', () => fs.readFileSync(path.join(__dirname, 'apps-script', 'K9AppBridge.gs'), 'utf8'));
 ipcMain.handle('k9:version', () => app.getVersion());
+ipcMain.handle('k9:phone-url', () => PHONE_URL);
 ipcMain.handle('k9:zoom', (event, factor) => { const f = Math.min(1.6, Math.max(0.8, Number(factor) || 1)); event.sender.setZoomFactor(f); return f; });
 ipcMain.handle('k9:focus', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
 

@@ -11,6 +11,11 @@ const store = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage off */ } },
 };
+/** True in the phone version (a web page), false in the Windows app. */
+const WEB = !!(window.k9 && window.k9.isWeb);
+const PHONE_MQ = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
+/** A phone-sized screen: lists show as cards and the sections sit along the bottom. */
+const isPhone = () => !!(PHONE_MQ && PHONE_MQ.matches);
 
 const LOGS = [
   { tab: 'Vaccinations', group: 'health', label: 'Vaccinations', noun: 'vaccination', date: 'Date Given', due: 'Next Due Date', bulk: true, sum: ['Vaccine Type', 'Clinic', 'Administering Vet'] },
@@ -111,6 +116,7 @@ const S = {
   logQ: '', changeQ: '',
   conn: { state: 'starting', code: '', msg: '', at: 0 },
   poll: null, saving: false, update: { state: 'idle' }, scanner: { state: 'off', name: '' },
+  phoneUrl: '', phoneCode: false, installLater: false,
 };
 let DOGS = [], BYCHIP = new Map(), BYID = new Map(), IDX = { byChip: new Map(), events: [] };
 
@@ -189,6 +195,8 @@ const IC = {
   image: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 5-4.5 3.5 3 3-2.5 4.5 4"/>',
   clip: '<path d="M16.5 7.5 9 15a2.1 2.1 0 0 1-3-3l8-8a3.5 3.5 0 0 1 5 5l-8.5 8.5a5 5 0 0 1-7-7L11 3"/>',
   doc: '<path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  share: '<path d="M12 15V4.5"/><path d="m8 8 4-4 4 4"/><path d="M6.5 11.5H5v8.5h14v-8.5h-1.5"/>',
 };
 const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${IC[n] || ''}</svg>`;
 

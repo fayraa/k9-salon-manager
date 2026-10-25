@@ -7,6 +7,11 @@ function renderNav() {
   $('#nav').innerHTML = NAV.map(n => `<button data-action="nav" data-view="${n.id}" ${g === n.id ? 'aria-current="page"' : ''}>${icon(n.icon)}<span>${n.label}</span>${n.id === 'dogs' && S.db ? `<span class="ct" aria-label="${active} active dogs">${active}</span>` : ''}</button>`).join('');
   const lic = farmInfo('Licence Number');
   $('#brand-sub').textContent = lic ? `Licence ${lic}` : 'Kennel records';
+  // on a phone the main sections sit along the bottom, and More opens the full list
+  const tabs = NAV.filter(n => ['home', 'dogs', 'breeding', 'records'].includes(n.id));
+  const open = $('#shell').classList.contains('nav-open');
+  $('#tabbar').innerHTML = tabs.map(n => `<button data-action="nav" data-view="${n.id}" ${g === n.id ? 'aria-current="page"' : ''}>${icon(n.icon)}<span>${n.label}</span></button>`).join('')
+    + `<button data-action="menu" aria-controls="rail" aria-expanded="${open}" ${tabs.some(n => n.id === g) ? '' : 'aria-current="true"'}>${icon('menu')}<span>More</span></button>`;
 }
 function renderSync() {
   const c = S.conn;
@@ -18,6 +23,10 @@ function renderSync() {
   else if (c.state === 'error') { dot = 'crit'; main = 'Not connected'; sub = c.msg; }
   $('#sync').innerHTML = `<span class="dot ${dot}" aria-hidden="true"></span><span><b>${esc(main)}</b><small>${esc(sub)}</small></span>`;
   $('#sync').setAttribute('aria-label', `${main}. ${sub}. Open connection settings.`);
+  const mini = $('#sync-mini');
+  mini.innerHTML = `${icon('sync')}<span class="dot ${dot}" aria-hidden="true"></span>`;
+  mini.setAttribute('aria-label', `${main}. ${sub}. Reload.`);
+  mini.title = `${main}. Tap to reload.`;
 }
 function renderTop() {
   const L = LOG[S.tab];
@@ -37,9 +46,12 @@ function renderTop() {
 function renderBanners() {
   const out = [];
   const u = S.update;
-  if (u.state === 'ready' && !S.updateDismissed) out.push(`<div class="banner acc" role="status">${icon('sync')}<span><b>Version ${esc(u.version)} is ready.</b> Restart the app to finish updating.</span><button class="btn sm primary" data-action="update-install">Restart now</button><button class="btn sm ghost" data-action="update-later">Later</button></div>`);
-  if (S.db && S.bridgeVersion < NEED_BRIDGE) out.push(`<div class="banner warn" role="status">${icon('info')}<span><b>Update your bridge script</b> to turn on bulk logging, litters, photos, reminders, change history and shared settings. It takes about 3 minutes.</span><button class="btn sm" data-action="bridge-help">Show me how</button></div>`);
-  else if (S.db && S.bridgeVersion < BRIDGE_LATEST && !S.bridgeLater) out.push(`<div class="banner soft" role="status">${icon('info')}<span><b>A bridge update is ready.</b> ${esc(bridgeNews())} About 3 minutes.</span><button class="btn sm" data-action="bridge-help">Show me how</button><button class="btn sm ghost" data-action="bridge-later">Later</button></div>`);
+  if (u.state === 'ready' && !S.updateDismissed) out.push(`<div class="banner acc" role="status">${icon('sync')}<span><b>Version ${esc(u.version)} is ready.</b> ${WEB ? 'Reload to start using it.' : 'Restart the app to finish updating.'}</span><button class="btn sm primary" data-action="update-install">${WEB ? 'Reload now' : 'Restart now'}</button><button class="btn sm ghost" data-action="update-later">Later</button></div>`);
+  // the bridge is updated from a computer, so the phone only says so
+  const onComputer = 'Update it from K-9 Salon Manager on the computer: Settings, then Connection.';
+  if (S.db && S.bridgeVersion < NEED_BRIDGE) out.push(`<div class="banner warn" role="status">${icon('info')}<span><b>Update your bridge script</b> to turn on bulk logging, litters, photos, reminders, change history and shared settings. ${WEB ? onComputer : 'It takes about 3 minutes.'}</span>${WEB ? '' : '<button class="btn sm" data-action="bridge-help">Show me how</button>'}</div>`);
+  else if (S.db && S.bridgeVersion < BRIDGE_LATEST && !S.bridgeLater) out.push(`<div class="banner soft" role="status">${icon('info')}<span><b>A bridge update is ready.</b> ${esc(bridgeNews())} ${WEB ? onComputer : 'About 3 minutes.'}</span>${WEB ? '' : '<button class="btn sm" data-action="bridge-help">Show me how</button>'}<button class="btn sm ghost" data-action="bridge-later">Later</button></div>`);
+  if (WEB) out.push(installBannerHTML());
   $('#banners').innerHTML = out.join('');
 }
 function renderAll() {
@@ -60,6 +72,7 @@ function afterViewRender() {
   if (S.view === 'settings') afterSettings();
 }
 function go(view, tab) {
+  if (view !== 'settings') hidePhoneCode(); // the connection code never stays on screen behind you
   S.view = view; S.tab = view === 'log' ? tab : null;
   if (view === 'log') S.logQ = '';
   store.set('k9.view', view); store.set('k9.tab', tab || '');
@@ -79,6 +92,7 @@ function pushOverlay(kind, inner, opts = {}) {
   document.body.appendChild(wrap);
   const o = { kind, el: wrap, prevFocus: document.activeElement, ...opts };
   OV.push(o);
+  syncBack();
   $('#shell').setAttribute('aria-hidden', 'true');
   setTimeout(() => {
     if (wrap.contains(document.activeElement)) return;
@@ -97,16 +111,49 @@ function closeTop(force) {
   if (o.onClose) o.onClose();
   if (!OV.length) $('#shell').removeAttribute('aria-hidden');
   if (o.prevFocus && o.prevFocus.focus && document.contains(o.prevFocus)) o.prevFocus.focus();
+  syncBack();
 }
+/* On a phone, the Back button (or gesture) closes what's open, instead of leaving the app.
+   While a dialog, profile or the sections menu is open there is one extra history entry for Back to use up. */
+// The entry is matched up after the current step, so closing one dialog and opening another (a search result, say)
+// leaves it in place; and nothing new is added while the app's own step back is still under way.
+let backEntry = false, backPending = false, backQueued = false, backTimer = null;
+const isOpen = () => OV.length > 0 || $('#shell').classList.contains('nav-open');
+function syncBack() {
+  if (!WEB || backQueued) return;
+  backQueued = true;
+  setTimeout(() => {
+    backQueued = false;
+    if (backPending) return; // finishes when the step back arrives
+    if (isOpen() && !backEntry) { try { history.pushState({ k9: 'open' }, ''); backEntry = true; } catch (e) { /* history unavailable */ } }
+    else if (!isOpen() && backEntry) {
+      backEntry = false; backPending = true;
+      history.back();
+      backTimer = setTimeout(() => { backPending = false; syncBack(); }, 1500); // in case the step back never arrives
+    }
+  }, 0);
+}
+// reopened on the app's extra entry (a reload, or a phone bringing the tab back) with nothing open: step back off it
+if (WEB && history.state && history.state.k9 === 'open') { backEntry = true; syncBack(); }
+window.addEventListener('popstate', e => {
+  if (!WEB) return;
+  backEntry = !!(e.state && e.state.k9 === 'open');
+  if (backPending) { backPending = false; clearTimeout(backTimer); syncBack(); return; } // the app's own step back
+  if (!backEntry) { if (OV.length) closeTop(); else closeNav(); } // Back pressed: close what's on top
+  syncBack(); // something is still open (another dialog, or a form with unsaved changes), so Back keeps working
+});
 const topOverlay = kind => { const o = OV[OV.length - 1]; return o && (!kind || o.kind === kind) ? o : null; };
 /** Keeps Tab and Shift+Tab inside the dialog that is on top. */
 function trapFocus(e) {
   const o = OV[OV.length - 1];
-  if (!o || e.key !== 'Tab') return;
-  const items = $$('a[href],button:not(:disabled),input:not(:disabled):not([type=hidden]),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])', o.el).filter(x => x.offsetParent !== null && !x.classList.contains('scrim'));
+  if (e.key !== 'Tab') return;
+  // the sections menu, when it slides over a narrow window, holds the focus the same way
+  const box = o ? o.el : $('#shell').classList.contains('nav-open') ? $('#rail') : null;
+  if (!box) return;
+  const items = $$('a[href],button:not(:disabled),input:not(:disabled):not([type=hidden]),select:not(:disabled),textarea:not(:disabled),summary,[tabindex]:not([tabindex="-1"])', box).filter(x => x.offsetParent !== null && !x.classList.contains('scrim'));
   if (!items.length) return;
   const first = items[0], last = items[items.length - 1];
-  if (!o.el.contains(document.activeElement)) { e.preventDefault(); first.focus(); return; }
+  if (!box.contains(document.activeElement)) { e.preventDefault(); first.focus(); return; }
   if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 }
@@ -128,7 +175,7 @@ function toast(msg, err) {
 }
 async function copyText(text, label) {
   try { await window.k9.copy(text); toast(label || `Copied ${text}`); }
-  catch (e) { toast('Couldn’t copy. Select the text and press Ctrl+C instead.', true); }
+  catch (e) { toast(WEB ? 'Couldn’t copy. Press and hold the text to copy it instead.' : 'Couldn’t copy. Select the text and press Ctrl+C instead.', true); }
 }
 
 /* ───────── search (Ctrl+K) ───────── */
@@ -185,11 +232,25 @@ function drawPalette(o) {
 }
 function runPalette(it) { closeTop(true); it.run(); }
 
-/* ───────── narrow-window menu ───────── */
-function toggleNav() {
+/* ───────── narrow-window menu (More, on a phone) ───────── */
+let navOpener = null;
+function toggleNav(btn) {
   const sh = $('#shell');
   if (sh.classList.contains('nav-open')) return closeNav();
   sh.classList.add('nav-open');
-  const s = document.createElement('div'); s.className = 'nav-scrim'; s.id = 'nav-scrim'; s.addEventListener('click', closeNav); document.body.appendChild(s);
+  navOpener = btn || null;
+  const s = document.createElement('div'); s.className = 'nav-scrim'; s.id = 'nav-scrim'; s.addEventListener('click', () => closeNav()); document.body.appendChild(s);
+  $$('[data-action="menu"]').forEach(b => b.setAttribute('aria-expanded', 'true'));
+  setTimeout(() => { const f = $('#nav button[aria-current="page"]') || $('#nav button'); if (f && sh.classList.contains('nav-open')) f.focus(); }, 60);
+  syncBack();
 }
-function closeNav() { $('#shell').classList.remove('nav-open'); const s = $('#nav-scrim'); if (s) s.remove(); }
+function closeNav() {
+  const sh = $('#shell');
+  const was = sh.classList.contains('nav-open');
+  sh.classList.remove('nav-open');
+  const s = $('#nav-scrim'); if (s) s.remove();
+  $$('[data-action="menu"]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+  if (was && navOpener && document.contains(navOpener) && $('#rail').contains(document.activeElement)) navOpener.focus();
+  navOpener = null;
+  if (was) syncBack();
+}

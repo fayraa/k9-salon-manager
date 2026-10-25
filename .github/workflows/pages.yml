@@ -1,0 +1,42 @@
+name: Phone version
+# Publishes web/ (the phone version) to GitHub Pages. The release workflow runs this after each release,
+# so phones get the same version as the Windows app. It can also be run by hand from the Actions tab.
+# One-time setup: Settings → Pages → Source: GitHub Actions.
+on:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npm run check
+      - run: npm run test:unit
+      - name: Check the page has no kennel connection details in it
+        run: |
+          if grep -rIlE 'script\.google\.com/(a/macros/[^/"]+/|macros/)s/AKfyc[A-Za-z0-9_-]{20,}|docs\.google\.com/spreadsheets/d/[A-Za-z0-9_-]{25,}|K9SALON:1:[su]=[A-Za-z0-9_%.-]{10,}&k=[A-Za-z0-9_-]{10,}' web/; then
+            echo "A web app URL, sheet link or connection code is in the published files."; exit 1
+          fi
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web
+      - id: deploy
+        uses: actions/deploy-pages@v5

@@ -100,20 +100,31 @@ function viewDogs() {
     <div class="seg" role="group" aria-label="Which dogs">${segs.map(([k, l]) => `<button data-action="dogs-status" data-status="${k}" aria-pressed="${f.status === k}">${l}</button>`).join('')}</div>
     <label class="sr" for="dog-breed">Breed</label><select class="sel" id="dog-breed"><option value="">All breeds</option>${breeds.map(b => `<option ${b === f.breed ? 'selected' : ''} value="${esc(b)}">${esc(titleCase(b))}</option>`).join('')}</select>
     <label class="sr" for="dog-sex">Sex</label><select class="sel" id="dog-sex"><option value="">Both sexes</option><option value="F" ${f.sex === 'F' ? 'selected' : ''}>Female</option><option value="M" ${f.sex === 'M' ? 'selected' : ''}>Male</option></select>
+    ${isPhone() ? `<label class="sr" for="dog-sort">Sort by</label><select class="sel" id="dog-sort">${DOG_SORTS.map(([k, l]) => `<option value="${k}" ${f.sort === k ? 'selected' : ''}>Sort: ${l}</option>`).join('')}</select>` : ''}
     ${f.issue ? `<button class="filter-chip" data-action="clear-issue" aria-label="Remove filter: ${esc(ISSUE[f.issue].label)}">${esc(ISSUE[f.issue].label)}${icon('x')}</button>` : ''}
     ${f.issue && QF_PRESETS.some(p => p.issue === f.issue) ? `<button class="btn sm" data-action="quick-fill" data-issue="${esc(f.issue)}">${icon('sheet')}Fill these in</button>` : ''}
     <span class="count" id="dog-count" aria-live="polite"></span>
   </div>
   <div id="dog-table"></div>`;
 }
+const DOG_SORTS = [['id', 'ID'], ['name', 'Name'], ['breed', 'Breed'], ['age', 'Age'], ['kennel', 'Kennel'], ['status', 'Status']];
+const issuePills = d => d.issues.map(i => `<span class="pill ${i.sev}" title="${esc(i.text)}">${esc(ISSUE[i.k].short)}</span>`).join('') || '<span class="pill ok">All good</span>';
 function dogTableHTML() {
   const list = dogList();
   const f = S.dogs;
+  if (isPhone()) {
+    // a card per dog on a phone, with the same details as the table's columns
+    const cards = list.map(d => `<li><button class="dogcard" data-action="open-dog" data-chip="${esc(d.chip)}" data-id="${esc(d.id)}">
+      <span class="dc-h"><b class="nm">${nameHTML(d)}</b><span class="muted num">${esc(d.id)}</span><span class="spacer"></span>${statusPill(d.status)}</span>
+      <small>${esc([titleCase(d.breed), sexWord(d.sex), ageText(d.dob), d.kennel ? `Kennel ${d.kennel}` : ''].filter(Boolean).join(' · '))}</small>
+      <span class="dc-f">${chipHTML(d.chip)}<span class="pills">${issuePills(d)}</span></span></button></li>`).join('');
+    return { count: list.length, html: list.length ? `<ul class="dogcards" aria-label="Dogs">${cards}</ul>` : `<div class="empty"><h2>No dogs match these filters</h2><p>Try another group or clear the search.</p></div>` };
+  }
   const th = (k, l) => `<th aria-sort="${f.sort === k ? (f.dir > 0 ? 'ascending' : 'descending') : 'none'}"><button data-action="sort" data-sort="${k}">${l}${f.sort === k ? (f.dir > 0 ? ' ↑' : ' ↓') : ''}</button></th>`;
   const rows = list.map(d => `<tr class="click" data-action="open-dog" data-chip="${esc(d.chip)}" data-id="${esc(d.id)}" tabindex="0" aria-label="${esc(dogLabel(d))}">
     <td class="num muted">${esc(d.id)}</td><td><b class="nm">${nameHTML(d)}</b><span class="sub">${esc(titleCase(d.colour))}</span></td>
     <td>${esc(titleCase(d.breed))}</td><td>${esc(sexWord(d.sex))}</td><td class="num">${esc(ageText(d.dob))}</td><td class="num">${esc(d.kennel || '—')}</td><td>${chipHTML(d.chip)}</td>
-    <td>${statusPill(d.status)}</td><td><div class="pills">${d.issues.map(i => `<span class="pill ${i.sev}" title="${esc(i.text)}">${esc(ISSUE[i.k].short)}</span>`).join('') || '<span class="pill ok">All good</span>'}</div></td></tr>`).join('');
+    <td>${statusPill(d.status)}</td><td><div class="pills">${issuePills(d)}</div></td></tr>`).join('');
   return { count: list.length, html: list.length ? `<div class="table-wrap"><table><thead><tr>${th('id', 'ID')}${th('name', 'Name')}${th('breed', 'Breed')}<th>Sex</th>${th('age', 'Age')}${th('kennel', 'Kennel')}<th>Microchip</th>${th('status', 'Status')}<th>To do</th></tr></thead><tbody>${rows}</tbody></table></div>`
     : `<div class="empty"><h2>No dogs match these filters</h2><p>Try another group or clear the search.</p></div>` };
 }
@@ -251,6 +262,19 @@ function logTableHTML() {
   let rows = t.rows.filter(r => !q || r.v.join(' ').toLowerCase().includes(q));
   if (dc != null) rows = rows.slice().sort((a, b) => (parseDate(b.v[dc]) || 0) - (parseDate(a.v[dc]) || 0));
   const cols = t.headers.map((h, c) => ({ h, c })).filter(x => x.h);
+  if (t.rows.length && isPhone()) {
+    // on a phone: one line per entry, newest first, with the dog's name when the entry has a microchip
+    const items = rows.map(r => {
+      const ev = { L, t, row: r };
+      const date = dc != null ? parseDate(r.v[dc]) : null;
+      const ch = firstChip(ev), dog = ch && BYCHIP.get(ch);
+      const parts = eventSummary(ev).split(' · ').filter(Boolean);
+      const title = dog ? dogName(dog) : ch || parts.shift() || cap(L.noun);
+      const sub = parts.join(' · ');
+      return `<li><button class="li${dc == null ? ' nodate' : ''}" data-action="edit-row" data-tab="${esc(t.name)}" data-r="${r.r}">${dc != null ? `<span class="d">${date ? shortD(date) : '—'}</span>` : ''}<span class="t"><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span>${icon('chev', 'muted')}</button></li>`;
+    }).join('');
+    return { count: rows.length, html: rows.length ? `<ul class="loglist panel" aria-label="${esc(L.label || t.name)}">${items}</ul>` : `<div class="empty slim"><p>No entries match “${esc(S.logQ)}”.</p></div>` };
+  }
   if (!t.rows.length) return { count: 0, html: `<div class="empty"><h2>No ${esc(L.noun)} records yet</h2><p>${L.readOnly ? 'Responses from your Google Form will appear here.' : `Add the first one and it is saved to the “${esc(t.name)}” tab.`}</p>${L.readOnly ? '' : `<div class="row"><button class="btn primary" data-action="new-entry" data-tab="${esc(t.name)}">${icon('plus')}New ${esc(L.noun)}</button>${L.bulk ? `<button class="btn" data-action="bulk" data-tab="${esc(t.name)}">${icon('many')}Log for many dogs</button>` : ''}</div>`}</div>` };
   const body = rows.map(r => `<tr class="click" data-action="edit-row" data-tab="${esc(t.name)}" data-r="${r.r}" tabindex="0">${cols.map(({ c }) => {
     const k = t.kinds[c], v = r.v[c] || '';

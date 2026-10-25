@@ -40,7 +40,14 @@ document.addEventListener('click', e => {
     case 'bridge-help': if (topOverlay('need')) closeTop(true); openBridgeHelp(); break;
     case 'reload': reload(); break;
     case 'reload-close': closeTop(true); reload(); break;
-    case 'menu': toggleNav(); break;
+    case 'menu': toggleNav(a); break;
+    case 'phone-code': showPhoneCode(true); break;
+    case 'phone-code-hide': showPhoneCode(false); break;
+    case 'scan-connect': scanConnect(); break;
+    case 'file-share': shareFile(); break;
+    case 'install-app': installApp(); break;
+    case 'install-later': S.installLater = true; renderBanners(); break;
+    case 'install-off': store.set('k9.installHint', 'off'); renderBanners(); break;
     case 'date-add': dateAdd(a); break;
     case 'guard-keep': { const g = a.closest('.guard'); if (g) g.remove(); break; }
     case 'guard-discard': closeTop(true); break;
@@ -76,6 +83,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   if (e.target.id === 'dog-breed') { S.dogs.breed = e.target.value; refreshDogTable(); }
   if (e.target.id === 'dog-sex') { S.dogs.sex = e.target.value; refreshDogTable(); }
+  if (e.target.id === 'dog-sort') { S.dogs.sort = e.target.value; S.dogs.dir = 1; refreshDogTable(); }
   if (e.target.id === 'photo-in') uploadPhoto(e.target);
 });
 document.addEventListener('submit', e => {
@@ -85,6 +93,14 @@ document.addEventListener('submit', e => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && S.db && !S.saving && Date.now() - S.conn.at > 120000) deskLoad();
 });
+// turning a phone or resizing a window between phone and wider layouts redraws lists as cards or tables
+if (PHONE_MQ && PHONE_MQ.addEventListener) PHONE_MQ.addEventListener('change', () => {
+  if (!S.db || !['dogs', 'log'].includes(S.view)) return;
+  const id = document.activeElement && document.activeElement.id;
+  renderView();
+  const back = id && document.getElementById(id);
+  if (back) back.focus({ preventScroll: true });
+});
 
 /* ───────── start ───────── */
 (async () => {
@@ -92,6 +108,7 @@ document.addEventListener('visibilitychange', () => {
   S.prefs = Object.assign(clone(DEFAULT_PREFS), p || {});
   S.prefs.scanner = Object.assign(clone(DEFAULT_PREFS.scanner), (p && p.scanner) || {});
   S.version = await window.k9.version().catch(() => '');
+  S.phoneUrl = window.k9.phoneUrl ? await window.k9.phoneUrl().catch(() => '') : '';
   applyDisplay();
   const savedView = store.get('k9.view');
   if (savedView && (NAV.some(n => n.id === savedView) || savedView === 'log')) { S.view = savedView; S.tab = store.get('k9.tab') || null; if (S.view === 'log' && !S.tab) S.view = 'home'; }
@@ -100,6 +117,12 @@ document.addEventListener('visibilitychange', () => {
   window.k9.onUpdate(onUpdateState);
   window.k9.onSerialPorts(chooseSerialPort);
   window.k9.getUpdateState().then(onUpdateState).catch(() => {});
+  if (window.k9.onDevice) window.k9.onDevice(() => {
+    renderBanners();
+    // Settings shows an Add to home screen button; don't redraw it under someone who is typing
+    const a = document.activeElement, typing = a && $('#view').contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName);
+    if (S.view === 'settings' && !OV.length && !typing) { const y = $('#main').scrollTop; renderView(); $('#main').scrollTop = y; }
+  });
   connect();
   if (S.prefs.scanner.serial) serialConnect(false);
 })();

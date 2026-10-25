@@ -57,3 +57,11 @@ jobs:
         run: |
           gh release create "v$VERSION" "dist/K-9-Salon-Manager-Setup-$VERSION.exe" dist/latest.json \
             --target "$GITHUB_SHA" --title "K-9 Salon Manager $VERSION" --notes-file dist/release-notes.md
+  phone:
+    # the phone version follows each release, so phones and computers stay on the same version
+    needs: release
+    uses: ./.github/workflows/pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write

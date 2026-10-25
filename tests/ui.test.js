@@ -982,3 +982,46 @@ test('documents: a list the bridge couldn’t read is reported, and nothing on t
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('Use on a phone: a code that opens the phone version, and a connection code shown only when asked', async () => {
+  const jsQR = require('jsqr');
+  const url = 'https://script.google.com/macros/s/AKfycbTEST0123456789/exec', key = 'k'.repeat(40);
+  const { page, errors, ctx } = await openApp({ prefs: { url, key } });
+  await page.clock.install();
+  await page.click('.nav button[data-view="settings"]');
+  await page.waitForSelector('#set-phone');
+  // read a code back the way a phone camera would
+  const read = async sel => {
+    const px = await page.evaluate(async s => {
+      const svg = document.querySelector(s);
+      const img = new Image();
+      img.src = 'data:image/svg+xml;base64,' + btoa(new XMLSerializer().serializeToString(svg));
+      await img.decode();
+      const c = document.createElement('canvas'); c.width = c.height = 400;
+      const g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, 400, 400);
+      return Array.from(g.getImageData(0, 0, 400, 400).data);
+    }, sel);
+    const r = jsQR(Uint8ClampedArray.from(px), 400, 400);
+    return r && r.data;
+  };
+  assert.equal(await page.locator('#set-phone svg.qr').count(), 1, 'only the code that opens the phone version, which holds no key');
+  assert.equal(await read('.phone-link svg.qr'), 'https://fayraa.github.io/k9-salon-manager/');
+  await page.click('[data-action="phone-code"]');
+  await page.waitForSelector('.phone-code svg.qr');
+  assert.match(await page.textContent('#set-phone'), /Anyone who scans this code/);
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.action), 'phone-code-hide', 'focus moves to Hide');
+  assert.equal(await read('.phone-code svg.qr'), `K9SALON:1:s=AKfycbTEST0123456789&k=${key}`);
+  await page.click('[data-action="phone-code-hide"]');
+  assert.equal(await page.locator('.phone-code').count(), 0);
+  // it hides itself after 3 minutes
+  await page.click('[data-action="phone-code"]');
+  await page.clock.fastForward(181000);
+  await page.waitForSelector('.phone-code', { state: 'detached' });
+  // and when you leave Settings
+  await page.click('[data-action="phone-code"]');
+  await page.click('.nav button[data-view="home"]');
+  await page.click('.nav button[data-view="settings"]');
+  assert.equal(await page.locator('.phone-code').count(), 0, 'leaving Settings hides it');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

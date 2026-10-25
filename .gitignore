@@ -7,3 +7,4 @@ renderer/fonts.css
 build/installer.nsi
 *.log
 .DS_Store
+/web/

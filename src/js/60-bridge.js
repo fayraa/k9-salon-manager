@@ -17,6 +17,7 @@ const DESK_COPY = {
 const UNCONFIRMED = 'Google didn’t confirm the save, so it may or may not have gone through. Press Save again: if it already went through, it won’t be saved twice.';
 function deskText(res) {
   const code = res && res.error;
+  if (WEB && code === 'network' && !res.offline) return 'Couldn’t reach the bridge. Check the internet connection, then try again. If it keeps happening, check the web app URL, and that the bridge is deployed with “Who has access” set to Anyone.';
   if (code === 'server') return `The bridge script reported a problem: ${res.message || 'unknown error'}`;
   if (code === 'no_tab') return res.message || 'A tab the app needs is missing from the sheet.';
   if (['no_column', 'invalid', 'refused'].includes(code) && res.message) return res.message;
@@ -58,18 +59,24 @@ function skippedNote(list) {
 
 async function connect() {
   clearInterval(S.poll);
+  // a read still on its way from the previous connection is ignored when it arrives
+  const gen = ++loadGen; deskLoading = null;
   if (!S.prefs.url || !S.prefs.key) { S.conn = { state: 'setup', code: 'not_setup', msg: DESK_COPY.not_setup, at: 0 }; renderAll(); return; }
   S.conn = { state: S.db ? 'stale' : 'starting', code: '', msg: S.db ? 'Refreshing…' : '', at: S.conn.at };
   renderSync(); if (!S.db) renderView();
   await deskLoad();
+  if (gen !== loadGen) return; // a newer connection took over, and keeps its own timer
+  clearInterval(S.poll);
   S.poll = setInterval(() => { if (document.visibilityState === 'visible' && !S.saving && !OV.some(o => o.job && o.job.saving)) deskLoad(); }, 120000);
 }
-let deskLoading = null;
+let deskLoading = null, loadGen = 0;
 function deskLoad() {
   if (deskLoading) return deskLoading;
-  deskLoading = (async () => {
+  const gen = loadGen;
+  const p = deskLoading = (async () => {
     const res = await deskCall({ action: 'read', tabs: wanted(), limits: READ_LIMITS, v: 2 });
-    deskLoading = null;
+    if (deskLoading === p) deskLoading = null;
+    if (gen !== loadGen) return; // the connection changed while this was loading
     if (!res || !res.ok) {
       const code = (res && res.error) || 'network';
       if (code === 'not_setup') { S.conn = { state: 'setup', code, msg: DESK_COPY.not_setup, at: 0 }; renderAll(); return; }
@@ -78,7 +85,7 @@ function deskLoad() {
     }
     S.sheetTitle = res.title || 'Google Sheet';
     if (res.url) { S.sheetUrl = res.url; const id = sheetIdFrom(res.url); if (id && id !== S.prefs.sheetId) setPrefs({ sheetId: id }); }
-    S.bridgeVersion = res.version || 1;
+    S.bridgeVersion = Math.max(1, Math.floor(Number(res.version)) || 1); // a number, whatever the bridge sends
     if (res.settings) S.shared = mergeShared(res.settings);
     S.photos = res.photos || {};
     // a list that couldn't be read keeps what was shown before, and nothing on this computer is cleared
@@ -89,7 +96,7 @@ function deskLoad() {
     if (!res.tabs || !res.tabs[MASTER]) { S.conn = { state: 'error', code: 'no_master', msg: 'The spreadsheet has no “All Breeds” tab. Rename the main tab back to “All Breeds”.', at: 0 }; renderAll(); return; }
     applyDb(parseBridge(res), Date.now());
   })();
-  return deskLoading;
+  return p;
 }
 function applyDb(db, at) {
   const first = !S.db;
@@ -103,7 +110,7 @@ function applyDb(db, at) {
   if (first) dailyNotice();
 }
 function dailyNotice() {
-  if (!S.prefs.notify || store.get('k9.notified') === isoD(TODAY)) return;
+  if (WEB || !S.prefs.notify || store.get('k9.notified') === isoD(TODAY)) return; // phones get the daily email instead
   const items = upcoming(0);
   const late = items.filter(u => u.days < 0).length, today = items.filter(u => u.days === 0).length;
   store.set('k9.notified', isoD(TODAY));
@@ -117,6 +124,7 @@ let refreshTimer = null;
 function scheduleRefresh(ms = 1200) { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => deskLoad(), ms); }
 async function reload() {
   if (topOverlay('conn')) closeTop(true);
+  if (!S.db && deskLoading) return deskLoading; // the first load is still on its way: wait for it rather than start again
   if (S.conn.state === 'setup' || !S.db) return connect();
   toast('Reloading from Google Sheets…');
   return deskLoad();
@@ -161,14 +169,16 @@ async function copyScript(sheetLinkInput) {
     toast('Bridge script copied. Paste it into your Apps Script project.');
   } catch (e) { toast('Couldn’t copy the script.', true); }
 }
-function connFields(st, id) {
+function connFields(st, id, withName) {
   return `<form id="${id}" class="form-grid" novalidate>
-    <div class="field wide"><label for="${id}-url">Web app URL</label><input class="inp" id="${id}-url" name="url" value="${esc(st.url || '')}" placeholder="https://script.google.com/macros/s/…/exec" spellcheck="false" autocomplete="off"></div>
-    <div class="field wide"><label for="${id}-key">Access key</label><input class="inp mono" id="${id}-key" name="key" value="${esc(st.key || '')}" placeholder="Shown in the execution log after running setupAppBridge" spellcheck="false" autocomplete="off"></div>
-    <div class="field wide row-inline"><button class="btn primary" type="submit">Connect</button><span class="muted set-msg" aria-live="polite">The URL and key are stored only on this computer.</span></div>
+    <div class="field wide"><label for="${id}-url">Web app URL</label><input class="inp" id="${id}-url" name="url" value="${esc(st.url || '')}" placeholder="https://script.google.com/macros/s/…/exec" spellcheck="false" autocomplete="off" autocapitalize="off" inputmode="url"></div>
+    <div class="field wide"><label for="${id}-key">Access key</label><input class="inp mono" id="${id}-key" name="key" value="${esc(st.key || '')}" placeholder="Shown in the execution log after running setupAppBridge" spellcheck="false" autocomplete="off" autocapitalize="off"></div>
+    ${withName ? `<div class="field wide"><label for="${id}-who">Your name</label><input class="inp" id="${id}-who" name="who" value="${esc(st.who || '')}" autocomplete="name" maxlength="60" placeholder="For example Austin"><span class="hint">Shown in the change history for what you save here.</span></div>` : ''}
+    <div class="field wide row-inline"><button class="btn primary" type="submit">Connect</button><span class="muted set-msg" aria-live="polite">The URL and key are stored only on this ${WEB ? 'phone' : 'computer'}.</span></div>
   </form>`;
 }
 function setupView() {
+  if (WEB) return phoneSetupView();
   return `<div class="setup">
   <div><h2>Connect K-9 Salon Manager to your Google Sheet</h2><p class="lede">The app reads and saves your kennel records through a small script that runs in your own Google account. You only do this once.</p></div>
   <ol class="steps">
@@ -190,6 +200,15 @@ function bridgeNews() {
   return parts.length ? `The update adds ${parts.join(', and ')}.` : 'It’s up to date.';
 }
 function openBridgeHelp() {
+  if (WEB) {
+    modal('bridge', {
+      title: 'Update the bridge from a computer', narrow: true,
+      sub: `Your bridge is version ${S.bridgeVersion || 1}. ${bridgeNews()}`,
+      body: '<p style="margin:0">The bridge script is updated in Google Apps Script, which needs a computer. On the computer, open K-9 Salon Manager, go to <b>Settings</b>, then <b>Connection</b>, and choose <b>How to update the bridge</b>. It takes about 3 minutes, and this phone picks up the new version by itself.</p>',
+      foot: `<span class="msg"></span><button class="btn" data-action="close-top">Close</button>`,
+    });
+    return;
+  }
   modal('bridge', {
     title: 'Update the bridge script', narrow: false,
     sub: `Your bridge is version ${S.bridgeVersion || 1}. ${bridgeNews()}`,
@@ -212,12 +231,15 @@ async function submitConnForm(f) {
   const res = await window.k9.test({ url, key }).catch(() => ({ ok: false, error: 'network' }));
   btn.disabled = false; btn.textContent = 'Connect';
   if (!res || !res.ok) return say(deskText(res || {}), true);
-  const saved = await window.k9.setPrefs({ url, key }).catch(() => ({ ok: false }));
-  if (!saved || !saved.ok) return say(deskText(saved || {}), true);
-  S.prefs.url = url; S.prefs.key = key;
+  const patch = { url, key };
+  if (f.elements.who) patch.who = f.elements.who.value.replace(/[\r\n\t]/g, ' ').trim().slice(0, 60);
+  const saved = await window.k9.setPrefs(patch).catch(() => ({ ok: false }));
+  if (!saved || !saved.ok) return say(saved && saved.error === 'storage' ? 'This browser won’t let the app keep its settings. Turn off private browsing and try again.' : deskText(saved || {}), true);
+  Object.assign(S.prefs, patch);
   toast(`Connected to “${res.title || 'your sheet'}”${res.version < BRIDGE_LATEST ? '. Your bridge script has an update available.' : ''}`);
   if (topOverlay('conn')) closeTop(true);
   S.db = null;
+  hidePhoneCode(); // a code showing the old connection never comes back
   if (S.view === 'settings') S.view = 'home';
   connect();
 }

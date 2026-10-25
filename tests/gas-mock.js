@@ -164,7 +164,8 @@ function loadBridge(ss, extra = {}) {
   };
   const folderObj = id => ({
     getId: () => id, isTrashed: () => folders.get(id).trashed, setTrashed: t => { folders.get(id).trashed = !!t; },
-    createFile: blob => { const fid = 'file' + (files.size + 1); blob.folder = id; files.set(fid, blob); return fileObj(fid); },
+    // file IDs are shaped like Drive's, which the apps check before fetching one
+    createFile: blob => { const fid = 'drivefile' + String(files.size + 1).padStart(6, '0'); blob.folder = id; files.set(fid, blob); return fileObj(fid); },
   });
   const ctx = {
     console: { log() {}, warn() {} },
