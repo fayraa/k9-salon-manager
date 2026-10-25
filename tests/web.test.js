@@ -505,7 +505,6 @@ test('the home screen app keeps only its own files, checks them, and still opens
 test('another site can’t show the app inside its own page', async () => {
   const ctx = await browser.newContext(PHONE);
   const page = await ctx.newPage();
-  await page.goto(`${ORIGIN}/elsewhere`).catch(() => {});
   await page.setContent(`<iframe src="${ORIGIN}/k9/" style="width:390px;height:600px"></iframe>`);
   const frame = await (await page.waitForSelector('iframe')).contentFrame();
   await frame.waitForFunction(() => document.body && /own browser tab/.test(document.body.textContent));
