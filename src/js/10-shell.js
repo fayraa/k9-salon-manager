@@ -133,6 +133,8 @@ function syncBack() {
     }
   }, 0);
 }
+// reopened on the app's extra entry (a reload, or a phone bringing the tab back) with nothing open: step back off it
+if (WEB && history.state && history.state.k9 === 'open') { backEntry = true; syncBack(); }
 window.addEventListener('popstate', e => {
   if (!WEB) return;
   backEntry = !!(e.state && e.state.k9 === 'open');

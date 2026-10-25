@@ -60,11 +60,13 @@ function skippedNote(list) {
 async function connect() {
   clearInterval(S.poll);
   // a read still on its way from the previous connection is ignored when it arrives
-  loadGen++; deskLoading = null;
+  const gen = ++loadGen; deskLoading = null;
   if (!S.prefs.url || !S.prefs.key) { S.conn = { state: 'setup', code: 'not_setup', msg: DESK_COPY.not_setup, at: 0 }; renderAll(); return; }
   S.conn = { state: S.db ? 'stale' : 'starting', code: '', msg: S.db ? 'Refreshing…' : '', at: S.conn.at };
   renderSync(); if (!S.db) renderView();
   await deskLoad();
+  if (gen !== loadGen) return; // a newer connection took over, and keeps its own timer
+  clearInterval(S.poll);
   S.poll = setInterval(() => { if (document.visibilityState === 'visible' && !S.saving && !OV.some(o => o.job && o.job.saving)) deskLoad(); }, 120000);
 }
 let deskLoading = null, loadGen = 0;
@@ -122,6 +124,7 @@ let refreshTimer = null;
 function scheduleRefresh(ms = 1200) { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => deskLoad(), ms); }
 async function reload() {
   if (topOverlay('conn')) closeTop(true);
+  if (!S.db && deskLoading) return deskLoading; // the first load is still on its way: wait for it rather than start again
   if (S.conn.state === 'setup' || !S.db) return connect();
   toast('Reloading from Google Sheets…');
   return deskLoad();

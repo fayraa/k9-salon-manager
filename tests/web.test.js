@@ -106,7 +106,7 @@ function sheetFromFixture() {
 async function openPhone(opts = {}) {
   const ss = opts.ss || sheetFromFixture();
   const bridge = opts.bridge || loadBridge(ss);
-  G.bridges = Object.assign({ [BRIDGE]: bridge }, opts.bridges || {}); G.calls = []; G.mode = 'ok'; G.slowRead = {}; G.siteDown = false;
+  G.bridges = Object.assign({ [BRIDGE]: bridge }, opts.bridges || {}); G.calls = []; G.mode = 'ok'; G.slowRead = opts.slowRead || {}; G.siteDown = false;
   const calls = G.calls;
   const ctx = await (opts.browser || browser).newContext(Object.assign({}, PHONE, { serviceWorkers: opts.sw || 'block', ignoreHTTPSErrors: true }, opts.context || {}));
   if (opts.prefs !== null) {
@@ -223,6 +223,18 @@ test('a key in the address is never used or kept', async () => {
   assert.equal(await page.locator('.mcard').count(), 0);
   assert.equal(calls.length, 0, 'nothing is sent anywhere');
   assert.equal(await page.evaluate(() => localStorage.getItem('k9.prefs')), null);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('tapping reload while the first load is still coming waits for it instead of starting again', async () => {
+  const { page, ctx, errors, calls } = await openPhone({ slowRead: { [BRIDGE]: 1500 }, wait: false });
+  await page.waitForSelector('#sync-mini .ic');
+  await page.click('#sync-mini');
+  await page.click('#sync-mini');
+  await page.waitForSelector('.quick', { timeout: 15000 });
+  await page.waitForTimeout(500);
+  assert.equal(calls.filter(c => c.payload && c.payload.action === 'read').length, 1);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -472,9 +484,11 @@ test('the home screen app keeps only its own files, checks them, and still opens
   assert.ok(kept.urls.every(u => u.startsWith(`${ORIGIN}/k9/`) && /\/k9\/($|app\.js|app\.css|fonts|k9-web\.js|manifest|icons\/)/.test(u)), `only app files: ${kept.urls.join(' ')}`);
   // a copy changed by another page on the same site is never used
   await page.evaluate(async () => { const n = (await caches.keys()).find(k => k.startsWith('k9-salon-')); const c = await caches.open(n); const k = (await c.keys()).find(r => /app\.js/.test(r.url)); await c.put(k, new Response('document.title = "PWNED";', { headers: { 'Content-Type': 'application/javascript' } })); });
-  await page.reload();
-  await page.waitForSelector('.quick');
-  assert.notEqual(await page.title(), 'PWNED');
+  const fresh = await ctx.newPage(); // a new tab, which is where a kept copy would be used
+  await fresh.goto(`${ORIGIN}/k9/`);
+  await fresh.waitForSelector('.quick');
+  assert.notEqual(await fresh.title(), 'PWNED');
+  await fresh.close();
   // no connection at all: the kept page still opens
   G.siteDown = true;
   await ctx.setOffline(true);
@@ -544,6 +558,18 @@ test('the phone’s Back button closes what’s open, one step at a time, instea
   assert.ok(page.url().startsWith(`${ORIGIN}/k9/`), 'closing it doesn’t leave the app');
   await openDogCard(page, 'Biscuit');
   await page.waitForTimeout(50); // (a person can't press Back within the same moment)
+  await back();
+  await page.waitForSelector('.drawer', { state: 'detached' });
+  assert.ok(page.url().startsWith(`${ORIGIN}/k9/`));
+  // reloaded while a profile was open: the first Back after that still closes what's open
+  await openDogCard(page, 'Mochi');
+  await page.waitForTimeout(50);
+  await page.reload();
+  await page.waitForSelector('.dogcards'); // it reopens on the Dogs page
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => history.state), null, 'the leftover step is used up');
+  await openDogCard(page, 'Pepper');
+  await page.waitForTimeout(50);
   await back();
   await page.waitForSelector('.drawer', { state: 'detached' });
   assert.ok(page.url().startsWith(`${ORIGIN}/k9/`));

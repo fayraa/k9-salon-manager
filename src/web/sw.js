@@ -24,18 +24,19 @@ async function kept(key) {
   return null;
 }
 async function keep(key, res) {
-  if (!KNOWN[key] || !res.ok || res.type !== 'basic') return;
-  if (await sha256(res) !== KNOWN[key]) return; // a newer version is already published: don't mix it in
+  if (!KNOWN[key] || !res.ok || res.type !== 'basic') return false;
+  if (await sha256(res) !== KNOWN[key]) return false; // not this version's file: don't mix versions
   const c = await caches.open(CACHE);
   await c.put(key, res.clone());
+  return true;
 }
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
     for (const key of Object.keys(FILES)) {
       const res = await fetch(new Request(new URL(key, scopeURL).href, { cache: 'reload', credentials: 'same-origin' }));
-      if (!res.ok) throw new Error(`Couldn't keep ${key}`);
-      await keep(key, res);
+      // a file that isn't exactly this version's (a publish half done, say) stops the install, and the version before stays in use
+      if (!(await keep(key, res))) throw new Error(`Couldn't keep ${key}`);
     }
     await self.skipWaiting();
   })());
