@@ -143,12 +143,14 @@ function kennelList() {
     const no = String(cell(t, r, 'Kennel No.')).trim();
     if (!no) continue;
     const capRaw = cell(t, r, 'Capacity');
-    out.push({ no, block: cell(t, r, 'Block'), capacity: capRaw !== '' && isFinite(+capRaw) ? +capRaw : null, type: cell(t, r, 'Type'), notes: cell(t, r, 'Notes'), row: r });
+    out.push({ no, capacity: capRaw !== '' && isFinite(+capRaw) ? +capRaw : null, row: r });
   }
   const known = new Set(out.map(k => k.no));
   const extra = Array.from(new Set(DOGS.filter(isActive).map(d => d.kennel).filter(k => k && !known.has(k))));
-  extra.forEach(no => out.push({ no, block: '', capacity: null, type: '', notes: '', missing: true }));
-  return out.sort((a, b) => (a.block || '~').localeCompare(b.block || '~') || (parseFloat(a.no) - parseFloat(b.no)) || a.no.localeCompare(b.no));
+  extra.forEach(no => out.push({ no, capacity: null, missing: true }));
+  // kennels are one list in number order, shown by number only (the sheet's Block and Type columns aren't used)
+  const num = k => (isFinite(parseFloat(k.no)) ? parseFloat(k.no) : Infinity);
+  return out.sort((a, b) => (num(a) - num(b)) || a.no.localeCompare(b.no, undefined, { numeric: true }));
 }
 function kennelsHTML() {
   const ks = kennelList();
@@ -156,24 +158,22 @@ function kennelsHTML() {
   const by = {};
   active.forEach(d => { if (d.kennel) (by[d.kennel] = by[d.kennel] || []).push(d); });
   const none = active.filter(d => !d.kennel);
-  const blocks = {};
-  ks.forEach(k => (blocks[k.block || 'No block'] = blocks[k.block || 'No block'] || []).push(k));
   const card = k => {
     const dogs = (by[k.no] || []).sort((a, b) => dogName(a).localeCompare(dogName(b)));
     const n = dogs.length;
-    const over = k.capacity != null && n > k.capacity;
     const pct = k.capacity ? Math.min(100, n / k.capacity * 100) : 0;
-    return `<section class="kennel${over ? ' over' : ''}" aria-label="Kennel ${esc(k.no)}">
-      <div class="kn-h"><h3>Kennel ${esc(k.no)}</h3>${k.type ? `<span class="pill">${esc(k.type)}</span>` : ''}${over ? '<span class="pill crit">Over capacity</span>' : ''}</div>
+    // the count says how full it is ("5 of 3"); no warnings or labels on the kennel itself
+    return `<section class="kennel" aria-label="Kennel ${esc(k.no)}">
+      <div class="kn-h"><h3>Kennel ${esc(k.no)}</h3></div>
       <div class="kn-cap"><span>${k.capacity != null ? `${n} of ${k.capacity}` : plural(n, 'dog')}</span>${k.capacity ? `<span class="bar-track" aria-hidden="true"><span class="bar-fill" style="display:block;width:${pct.toFixed(0)}%"></span></span>` : ''}</div>
-      ${k.missing ? '<p class="muted small">Used on dogs but not in the Kennels tab.</p>' : ''}${k.notes ? `<p class="muted small">${esc(k.notes)}</p>` : ''}
+      ${k.missing ? '<p class="muted small">Used on dogs but not in the Kennels tab.</p>' : ''}
       <div class="kn-dogs">${dogs.map(d => `<button class="dogchip" data-action="open-dog" data-chip="${esc(d.chip)}" data-id="${esc(d.id)}">${esc(dogName(d))}<small>${esc(sexWord(d.sex).charAt(0))}</small></button>`).join('') || '<span class="muted small">Empty</span>'}</div>
       <button class="btn sm ghost" data-action="move-dog" data-kennel="${esc(k.no)}">${icon('move')}Move a dog here</button>
     </section>`;
   };
   if (!ks.length) return `<div class="empty"><h2>No kennels yet</h2><p>Add kennels in the Kennels tab (Records → Farm → Kennels) and give each dog a kennel number.</p><div class="row"><button class="btn primary" data-action="new-entry" data-tab="Kennels">${icon('plus')}Add a kennel</button></div></div>`;
   return `${none.length ? `<div class="note">${icon('info')}<span>${plural(none.length, 'active dog has', 'active dogs have')} no kennel number. Fill them all in at once, or use <b>Move a dog here</b> on a kennel.</span><button class="btn sm" data-action="quick-fill" data-preset="kennel">${icon('sheet')}Fill in kennels</button></div>` : ''}
-    ${Object.keys(blocks).map(b => `<section class="grid" style="gap:12px"><h2 class="sec-title">${esc(b)}</h2><div class="kennels">${blocks[b].map(card).join('')}</div></section>`).join('')}`;
+    <div class="kennels">${ks.map(card).join('')}</div>`;
 }
 function openMoveDog(kennel) {
   const options = DOGS.filter(isActive).map(d => `<option value="${esc(d.chip || 'id:' + d.id)}">${esc(`${dogLabel(d)} · now in ${d.kennel ? 'kennel ' + d.kennel : 'no kennel'}`)}</option>`).join('');
@@ -261,7 +261,7 @@ function logTableHTML() {
   const dc = L.date ? t.idx.get(L.date) : undefined;
   let rows = t.rows.filter(r => !q || r.v.join(' ').toLowerCase().includes(q));
   if (dc != null) rows = rows.slice().sort((a, b) => (parseDate(b.v[dc]) || 0) - (parseDate(a.v[dc]) || 0));
-  const cols = t.headers.map((h, c) => ({ h, c })).filter(x => x.h);
+  const cols = t.headers.map((h, c) => ({ h, c })).filter(x => x.h && !hiddenCol(L, x.h));
   if (t.rows.length && isPhone()) {
     // on a phone: one line per entry, newest first, with the dog's name when the entry has a microchip
     const items = rows.map(r => {

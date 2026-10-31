@@ -35,7 +35,7 @@ function openLitter(damChip) {
       <div class="form-grid three">
         <div class="field"><label for="lt-breed">Breed for all puppies <span class="req" aria-hidden="true">*</span></label><input class="inp" id="lt-breed" list="lt-breeds" autocomplete="off"><datalist id="lt-breeds">${breeds.map(b => `<option value="${esc(b)}"></option>`).join('')}</datalist></div>
         <div class="field"><label for="lt-prem">Premise</label><input class="inp" id="lt-prem" list="lt-prems" autocomplete="off"><datalist id="lt-prems">${Array.from(new Set(DOGS.map(d => d.premise).filter(Boolean))).map(p => `<option value="${esc(p)}"></option>`).join('')}</datalist></div>
-        <div class="field"><label for="lt-ken">Kennel</label><select class="sel" id="lt-ken"><option value="">No kennel yet</option>${kns.map(k => `<option value="${esc(k.no)}">Kennel ${esc(k.no)}${k.type ? ' · ' + esc(k.type) : ''}</option>`).join('')}</select></div>
+        <div class="field"><label for="lt-ken">Kennel</label><select class="sel" id="lt-ken"><option value="">No kennel yet</option>${kns.map(k => `<option value="${esc(k.no)}">Kennel ${esc(k.no)}</option>`).join('')}</select></div>
       </div>
       <div class="pup-table" id="lt-pups"></div>
       <p class="hint">Names and microchips are optional now. Add them later with <b>Edit details</b> on each puppy.</p>

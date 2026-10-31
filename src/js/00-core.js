@@ -36,10 +36,12 @@ const LOGS = [
   { tab: 'Visitor Log', group: 'facility', label: 'Visitors', noun: 'visit', date: 'Date', sum: ['Visitor Name', 'Purpose of Visit'] },
   { tab: 'Form_Responses', group: 'facility', label: 'Visitor declarations', noun: 'declaration', date: 'Timestamp', readOnly: true, sum: ['Name', 'Reasons for visiting'] },
   { tab: 'AVS Submissions', group: 'facility', label: 'AVS submissions', noun: 'AVS submission', date: 'Date Submitted', sum: ['Month', 'Submitted By'] },
-  { tab: 'Kennels', group: 'facility', label: 'Kennels', noun: 'kennel', sum: ['Block', 'Type', 'Capacity'] },
+  { tab: 'Kennels', group: 'facility', label: 'Kennels', noun: 'kennel', sum: ['Capacity'], hide: ['Block', 'Type'] },
   { tab: 'Farm Info', group: 'facility', label: 'Farm details', noun: 'farm detail', sum: ['Field', 'Value'] },
 ];
 const LOG = Object.fromEntries(LOGS.map(l => [l.tab, l]));
+/** Sheet columns the app no longer shows or fills in for a tab (they're left as they are in the sheet). */
+const hiddenCol = (L, h) => !!(L && L.hide && L.hide.includes(h));
 const GROUPS = {
   health: { label: 'Health', lede: 'Vaccinations, parasite control, health checks and vet records.' },
   breeding: { label: 'Breeding', lede: 'Heat cycles, matings and litters bred on site.' },
@@ -52,6 +54,7 @@ const NAV = [
   { id: 'breeding', label: 'Breeding', icon: 'heart' },
   { id: 'records', label: 'Records', icon: 'list' },
   { id: 'reports', label: 'Reports', icon: 'report' },
+  { id: 'history', label: 'History', icon: 'history', keys: 'change history changes log audit who changed edits' },
   { id: 'settings', label: 'Settings', icon: 'gear' },
 ];
 const EXAM = ['Normal', 'Abnormal — see remarks'];
@@ -113,7 +116,7 @@ const S = {
   prefs: clone(DEFAULT_PREFS), version: '',
   view: 'home', tab: null, reportTab: 'monthly', dogsMode: 'list',
   dogs: { status: 'active', breed: '', sex: '', q: '', issue: '', sort: 'id', dir: 1 },
-  logQ: '', changeQ: '',
+  logQ: '', histQ: '', histWho: '', histKind: '',
   conn: { state: 'starting', code: '', msg: '', at: 0 },
   poll: null, saving: false, update: { state: 'idle' }, scanner: { state: 'off', name: '' },
   phoneUrl: '', phoneCode: false, installLater: false,
@@ -196,6 +199,8 @@ const IC = {
   clip: '<path d="M16.5 7.5 9 15a2.1 2.1 0 0 1-3-3l8-8a3.5 3.5 0 0 1 5 5l-8.5 8.5a5 5 0 0 1-7-7L11 3"/>',
   doc: '<path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  history: '<path d="M4.6 13.5A7.6 7.6 0 1 0 6.3 7L4.5 8.8"/><path d="M4.5 4.6v4.2h4.2"/><path d="M12 8.2v4.3l2.9 1.8"/>',
+  spark: '<path d="M12 4v3.5M12 16.5V20M4 12h3.5M16.5 12H20M6.4 6.4l2.5 2.5M15.1 15.1l2.5 2.5M17.6 6.4l-2.5 2.5M8.9 15.1l-2.5 2.5"/>',
   share: '<path d="M12 15V4.5"/><path d="m8 8 4-4 4 4"/><path d="M6.5 11.5H5v8.5h14v-8.5h-1.5"/>',
 };
 const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${IC[n] || ''}</svg>`;

@@ -14,7 +14,6 @@ function openBulk(tab) {
   const st = { tab: tabs.find(L => L.tab === tab) ? tab : tabs[0].tab, sel: new Set(), f: { q: '', group: 'active', breed: '', sex: '', kennel: '' }, confirm: false };
   const breeds = Array.from(new Set(DOGS.map(d => d.breed).filter(Boolean))).sort();
   const kn = kennelList();
-  const blocks = Array.from(new Set(kn.map(k => k.block).filter(Boolean)));
   const o = modal('bulk', {
     title: 'Log for many dogs', wide: true, form: true,
     sub: 'Choose the record, tick the dogs, fill in the details once. Each dog gets its own row in the sheet.',
@@ -26,7 +25,7 @@ function openBulk(tab) {
           <label class="sr" for="bk-group">Group</label><select class="sel" id="bk-group"><option value="active">Active dogs</option><option value="breeding">Breeding dogs</option><option value="puppies">Puppies under 12 months</option><option value="adults">Adults</option><option value="all">All dogs</option></select>
           <label class="sr" for="bk-breed">Breed</label><select class="sel" id="bk-breed"><option value="">All breeds</option>${breeds.map(b => `<option value="${esc(b)}">${esc(titleCase(b))}</option>`).join('')}</select>
           <label class="sr" for="bk-sex">Sex</label><select class="sel" id="bk-sex"><option value="">Both sexes</option><option value="F">Female</option><option value="M">Male</option></select>
-          <label class="sr" for="bk-kennel">Kennel</label><select class="sel" id="bk-kennel"><option value="">Any kennel</option>${blocks.map(b => `<option value="block:${esc(b)}">${esc(b)}</option>`).join('')}${kn.map(k => `<option value="k:${esc(k.no)}">Kennel ${esc(k.no)}</option>`).join('')}</select>
+          <label class="sr" for="bk-kennel">Kennel</label><select class="sel" id="bk-kennel"><option value="">Any kennel</option>${kn.map(k => `<option value="k:${esc(k.no)}">Kennel ${esc(k.no)}</option>`).join('')}</select>
         </div>
         <div class="bulk-bar"><button type="button" class="btn sm" data-bk="all">Tick all shown</button><button type="button" class="btn sm ghost" data-bk="none">Untick all</button><span class="count" id="bk-count" aria-live="polite"></span></div>
         <div class="bulk-list" id="bk-list" role="group" aria-label="Dogs"></div>
@@ -63,7 +62,6 @@ function openBulk(tab) {
       if (f.breed && d.breed !== f.breed) return false;
       if (f.sex && !String(d.sex).toUpperCase().startsWith(f.sex)) return false;
       if (f.kennel.startsWith('k:') && d.kennel !== f.kennel.slice(2)) return false;
-      if (f.kennel.startsWith('block:')) { const k = kn.find(x => x.no === d.kennel); if (!k || k.block !== f.kennel.slice(6)) return false; }
       if (q && !`${d.id} ${d.name} ${d.breed}`.toLowerCase().includes(q) && !(qd.length >= 3 && d.chip.includes(qd))) return false;
       return true;
     }).sort((a, b) => dogName(a).localeCompare(dogName(b)));

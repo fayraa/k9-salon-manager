@@ -1,5 +1,5 @@
 /* ───────── chrome: sidebar, title bar, banners ───────── */
-const TITLES = { home: 'Home', dogs: 'Dogs', breeding: 'Breeding', records: 'Records', reports: 'Reports', settings: 'Settings' };
+const TITLES = { home: 'Home', dogs: 'Dogs', breeding: 'Breeding', records: 'Records', reports: 'Reports', history: 'History', settings: 'Settings' };
 function navGroup() { return S.view === 'log' ? 'records' : S.view; }
 function renderNav() {
   const active = DOGS.filter(isActive).length;
@@ -46,7 +46,10 @@ function renderTop() {
 function renderBanners() {
   const out = [];
   const u = S.update;
-  if (u.state === 'ready' && !S.updateDismissed) out.push(`<div class="banner acc" role="status">${icon('sync')}<span><b>Version ${esc(u.version)} is ready.</b> ${WEB ? 'Reload to start using it.' : 'Restart the app to finish updating.'}</span><button class="btn sm primary" data-action="update-install">${WEB ? 'Reload now' : 'Restart now'}</button><button class="btn sm ghost" data-action="update-later">Later</button></div>`);
+  const news = WEB ? '' : '<button class="btn sm" data-action="news" data-which="ready">What’s new</button>'; // the phone shows its notes once it has reloaded
+  if (u.state === 'ready' && !S.updateDismissed) out.push(`<div class="banner acc" role="status">${icon('sync')}<span><b>Version ${esc(u.version)} is ready.</b> ${WEB ? 'Reload to start using it and see what’s new.' : 'Restart the app to finish updating.'}</span>${news}<button class="btn sm primary" data-action="update-install">${WEB ? 'Reload now' : 'Restart now'}</button><button class="btn sm ghost" data-action="update-later">Later</button></div>`);
+  // with automatic downloads turned off, a new version waits to be asked for
+  else if (u.state === 'available' && !WEB && S.prefs.autoUpdate === false && !S.updateDismissed) out.push(`<div class="banner acc" role="status">${icon('sync')}<span><b>Version ${esc(u.version)} is available.</b> Download it now, then restart when you’re ready.</span>${news}<button class="btn sm primary" data-action="update-check">Download</button><button class="btn sm ghost" data-action="update-later">Later</button></div>`);
   // the bridge is updated from a computer, so the phone only says so
   const onComputer = 'Update it from K-9 Salon Manager on the computer: Settings, then Connection.';
   if (S.db && S.bridgeVersion < NEED_BRIDGE) out.push(`<div class="banner warn" role="status">${icon('info')}<span><b>Update your bridge script</b> to turn on bulk logging, litters, photos, reminders, change history and shared settings. ${WEB ? onComputer : 'It takes about 3 minutes.'}</span>${WEB ? '' : '<button class="btn sm" data-action="bridge-help">Show me how</button>'}</div>`);
@@ -61,7 +64,7 @@ function renderAll() {
 function renderView() {
   const v = $('#view');
   if (!S.db && S.view !== 'settings') { v.innerHTML = connectState(); return; }
-  const fn = { home: viewHome, dogs: viewDogs, breeding: viewBreeding, records: viewRecords, log: viewLog, reports: viewReports, settings: viewSettings }[S.view] || viewHome;
+  const fn = { home: viewHome, dogs: viewDogs, breeding: viewBreeding, records: viewRecords, log: viewLog, reports: viewReports, history: viewHistory, settings: viewSettings }[S.view] || viewHome;
   v.innerHTML = fn();
   afterViewRender();
 }
@@ -69,6 +72,7 @@ function afterViewRender() {
   if (S.view === 'dogs') refreshDogTable();
   if (S.view === 'log') refreshLogTable();
   if (S.view === 'reports') afterReports();
+  if (S.view === 'history') afterHistory();
   if (S.view === 'settings') afterSettings();
 }
 function go(view, tab) {
@@ -212,13 +216,13 @@ function paletteItems(q) {
       ['Record a litter', 'litter puppies whelp birth', () => openLitter()],
       ['Add a dog', 'add new dog', () => openForm({ tab: MASTER, mode: 'new' })],
       ['Monthly AVS report', 'avs monthly report submission', () => { S.reportTab = 'monthly'; go('reports'); }],
-      ['Change history', 'history changes log audit', () => { S.reportTab = 'changes'; go('reports'); }],
+      ['What’s new', 'whats new what’s new changelog changes update version release notes', () => openNews('all')],
     ];
     acts.filter(([t, k]) => match(t + ' ' + k)).forEach(([t, , run]) => items.push({ g: 'Do something', t, s: '', run }));
     LOGS.filter(L => S.db[L.tab] && !L.readOnly && match(`new ${L.noun} ${L.label}`)).slice(0, q ? 8 : 3)
       .forEach(L => items.push({ g: 'Do something', t: `New ${L.noun}`, s: `Saves to “${L.tab}”`, run: () => openForm({ tab: L.tab, mode: 'new' }) }));
   }
-  NAV.filter(n => match(n.label)).forEach(n => items.push({ g: 'Go to', t: n.label, s: '', run: () => go(n.id) }));
+  NAV.filter(n => match(`${n.label} ${n.keys || ''}`)).forEach(n => items.push({ g: 'Go to', t: n.label, s: '', run: () => go(n.id) }));
   if (S.db && q) LOGS.filter(L => S.db[L.tab] && match(L.label)).forEach(L => items.push({ g: 'Go to', t: L.label, s: `Tab “${L.tab}”`, run: () => go('log', L.tab) }));
   return items;
 }

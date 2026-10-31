@@ -16,7 +16,19 @@ const FONTS_CSS = `@font-face{font-family:"Nunito Sans";font-style:normal;font-d
 @font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:500;src:url(fonts/ibm-plex-mono-latin-500-normal.woff2) format("woff2")}
 `;
 const FONT_FILES = fs.readdirSync(path.join(root, 'renderer', 'fonts')).filter(f => f.endsWith('.woff2'));
-const app = bundle('js');
+// the newest changelog sections go into the app, for its "What's new" window
+function changes() {
+  const md = fs.existsSync(path.join(root, 'CHANGELOG.md')) ? fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8') : '';
+  const out = [];
+  md.split(/^## /m).slice(1).forEach(part => {
+    const nl = part.indexOf('\n');
+    const v = part.slice(0, nl < 0 ? undefined : nl).trim();
+    if (/^\d+\.\d+\.\d+$/.test(v)) out.push({ v, body: nl < 0 ? '' : part.slice(nl + 1).trim() });
+  });
+  if (out.length && out[0].v !== VERSION) throw new Error(`CHANGELOG.md starts with ${out[0].v}, but package.json says ${VERSION}. Add a "## ${VERSION}" section.`);
+  return out.slice(0, 8);
+}
+const app = bundle('js', `const CHANGES = ${JSON.stringify(changes())};\n`);
 const css = fs.readFileSync(src('app.css'), 'utf8');
 const body = fs.readFileSync(src('body.html'), 'utf8');
 

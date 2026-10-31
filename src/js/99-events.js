@@ -58,6 +58,7 @@ document.addEventListener('click', e => {
     case 'update-check': window.k9.updateCheck(); break;
     case 'update-install': window.k9.updateInstall(); break;
     case 'update-later': S.updateDismissed = true; renderBanners(); break;
+    case 'news': openNews(a.dataset.which || 'all'); break;
     default: break;
   }
 });
@@ -108,6 +109,8 @@ if (PHONE_MQ && PHONE_MQ.addEventListener) PHONE_MQ.addEventListener('change', (
   S.prefs = Object.assign(clone(DEFAULT_PREFS), p || {});
   S.prefs.scanner = Object.assign(clone(DEFAULT_PREFS.scanner), (p && p.scanner) || {});
   S.version = await window.k9.version().catch(() => '');
+  // used before on this device (so an update, not a new install, when no version has been noted yet)
+  S.usedBefore = !!((p && p.url) || store.get('k9.view'));
   S.phoneUrl = window.k9.phoneUrl ? await window.k9.phoneUrl().catch(() => '') : '';
   applyDisplay();
   const savedView = store.get('k9.view');

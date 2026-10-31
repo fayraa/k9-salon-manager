@@ -6,7 +6,8 @@ Google Sheet, so the sheet stays the single source of truth and anyone with acce
 **Download:** get the latest `K-9-Salon-Manager-Setup-x.y.z.exe` from the
 [Releases page](https://github.com/fayraa/k9-salon-manager/releases/latest) and run it.
 Windows may say it protected your PC because the installer isn't code-signed: choose **More info → Run anyway**.
-It installs for your Windows user only and adds Start menu and desktop shortcuts. After that, the app updates itself.
+It installs for your Windows user only and adds Start menu and desktop shortcuts. After that, the app updates itself,
+tells you when a new version is ready, and shows what's new after each update.
 
 **On a phone:** open **Settings → Use on a phone** in the Windows app and follow the three steps there.
 The phone version is at [fayraa.github.io/k9-salon-manager](https://fayraa.github.io/k9-salon-manager/) and sits on the
@@ -25,7 +26,8 @@ phone's home screen. See [Phone version](#phone-version).
 - **Record a litter**: the litter plus every puppy in one step, parents linked, IDs given automatically.
 - **Breeding**: dams, who's expecting, and eligibility under the rules you set from your licence conditions.
 - **Reports**: a monthly summary to help with your AVS submission (save as PDF, mark as submitted),
-  a due list, change history, and a herd summary.
+  a due list and a herd summary.
+- **History**: every change saved in the app, by day, with who made it and what changed from and to.
 - **Chip scanners**: keyboard-style USB scanners work anywhere; serial (COM port) scanners connect in Settings.
 - **Reminders**: an optional daily email and a Windows notification.
 - **Phone version**: the same app on iPhone and Android, from the home screen, connected by scanning a code.
@@ -43,7 +45,7 @@ computer always show the same records.
    or **⋮ → Add to Home screen**.
 3. Open it from the home screen, tap **Scan the code**, and point it at the **connection code** (choose
    **Show the connection code** on the computer). The phone shows the sheet's name and asks before connecting.
-   Type your name so the change history shows who saved what.
+   Type your name so History shows who saved what.
 
 The connection code is plain text, not a link, so only the app's own scanner uses it and it never ends up in a
 browser's history. Or enter the web app URL and access key by hand under

@@ -129,9 +129,81 @@ function chooseSerialPort(list) {
 function onUpdateState(u) {
   const prev = S.update.state;
   S.update = Object.assign({}, u);
-  if (u.state === 'ready' && prev !== 'ready') toast(WEB ? `Version ${u.version} is ready. Reload to start using it.` : `Version ${u.version} has downloaded. Restart when you’re ready.`);
+  if (u.state === 'ready' && prev !== 'ready') { toast(WEB ? `Version ${u.version} is ready. Reload to start using it.` : `Version ${u.version} has downloaded. Restart when you’re ready.`); updateNotice(u); }
   if (u.state === 'error' && u.manual) toast(u.message || 'Couldn’t check for updates.', true);
   if (u.state === 'none' && u.manual) toast('You have the latest version.');
   if (!S.updateDismissed) renderBanners();
   if (S.view === 'settings' && !OV.length) { const a = document.activeElement; if (!a || !/INPUT|SELECT|TEXTAREA/.test(a.tagName)) { const y = $('#main').scrollTop; renderView(); $('#main').scrollTop = y; } }
+}
+
+/** A Windows notification when a new version has downloaded, once for each version. */
+function updateNotice(u) {
+  if (WEB || !S.prefs.notify || !u.version || store.get('k9.updateNoticed') === u.version) return;
+  store.set('k9.updateNoticed', u.version);
+  try {
+    const n = new Notification('K-9 Salon Manager', { body: `Version ${u.version} is ready. Restart the app to start using it. Open it to see what’s new.`, silent: true });
+    n.onclick = () => { window.k9.focus(); openNews('ready'); };
+  } catch (e) { /* notifications unavailable */ }
+}
+
+/* ───────── what's new ───────── */
+const verParts = v => String(v || '').split('.').map(n => parseInt(n, 10) || 0);
+function newerThan(a, b) {
+  const x = verParts(a), y = verParts(b);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+}
+/** Changelog text as the app shows it: bold headings, bullet lists and paragraphs. Everything else stays plain text. */
+function notesHTML(md, h = 'h3') {
+  const inline = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
+  const out = [];
+  let list = false;
+  String(md || '').split('\n').forEach(line => {
+    const l = line.trim();
+    const item = /^[-*]\s+/.test(l);
+    if (list && !item) { out.push('</ul>'); list = false; }
+    if (!l) return;
+    if (item) { if (!list) { out.push('<ul>'); list = true; } out.push(`<li>${inline(l.replace(/^[-*]\s+/, ''))}</li>`); return; }
+    const head = l.match(/^\*\*([^*]+)\*\*$/) || l.match(/^#{3,6}\s+(.+)$/);
+    out.push(head ? `<${h} class="nh">${esc(head[1])}</${h}>` : `<p>${inline(l)}</p>`);
+  });
+  if (list) out.push('</ul>');
+  return out.join('');
+}
+/**
+ * What's new. 'ready': the version waiting to be installed (its notes come with the update).
+ * 'all': the latest versions, from Settings. Otherwise a list of changelog sections.
+ */
+function openNews(which) {
+  let secs, title, sub = '';
+  if (which === 'ready') {
+    const u = S.update;
+    if (!u.version) return;
+    secs = [{ v: u.version, body: u.notes || (CHANGES.find(c => c.v === u.version) || {}).body || 'No notes came with this update.' }];
+    title = `What’s new in version ${u.version}`;
+    sub = WEB ? 'Reload the app to start using it.' : 'Restart the app to start using it.';
+  } else if (which === 'all') {
+    secs = CHANGES; title = 'What’s new'; sub = `You have version ${esc(S.version || '—')}.`;
+  } else {
+    secs = which; title = `What’s new in version ${secs[0] && secs[0].v}`; sub = secs.length > 1 ? 'K-9 Salon has been updated. Here’s everything that changed since you last used it.' : 'K-9 Salon has been updated.';
+  }
+  if (!secs || !secs.length) { toast('No notes for this version.'); return; }
+  const many = secs.length > 1;
+  modal('news', {
+    title, sub,
+    body: `<div class="news">${secs.map(c => `<section aria-label="Version ${esc(c.v)}">${many ? `<h3>Version ${esc(c.v)}</h3>` : ''}${notesHTML(c.body, many ? 'h4' : 'h3')}</section>`).join('')}</div>`,
+    foot: `<span class="msg"></span>${which === 'ready' && S.update.state === 'ready' ? `<button type="button" class="btn" data-action="close-top">Later</button><button type="button" class="btn primary" data-action="update-install">${WEB ? 'Reload now' : 'Restart now'}</button>` : '<button type="button" class="btn primary" data-action="close-top">OK</button>'}`,
+  });
+}
+/** After an update, the first time the app has the sheet open: what changed since the version used last on this device. */
+function newsAfterUpdate() {
+  const cur = S.version;
+  if (!/^\d+\.\d+\.\d+$/.test(cur)) return;
+  const seen = store.get('k9.seenVersion');
+  if (seen && !newerThan(cur, seen)) return;
+  store.set('k9.seenVersion', cur);
+  // no version noted: a new install (nothing to tell), or the first update since this was added
+  if (!seen && !S.usedBefore) return;
+  const secs = CHANGES.filter(c => !newerThan(c.v, cur) && (seen ? newerThan(c.v, seen) : c.v === cur));
+  if (secs.length) openNews(secs);
 }

@@ -1,15 +1,14 @@
 /* ───────── reports ───────── */
-const REPORT_TABS = [['monthly', 'Monthly AVS report'], ['due', 'Due list'], ['changes', 'Change history'], ['herd', 'Herd summary']];
+const REPORT_TABS = [['monthly', 'Monthly AVS report'], ['due', 'Due list'], ['herd', 'Herd summary']];
 function viewReports() {
+  if (!REPORT_TABS.some(([k]) => k === S.reportTab)) S.reportTab = 'monthly';
   const tabs = `<div class="tabs" role="tablist" aria-label="Reports">${REPORT_TABS.map(([k, l]) => `<button role="tab" id="rt-${k}" aria-selected="${S.reportTab === k}" aria-controls="report-panel" data-action="report-tab" data-tab="${k}">${l}</button>`).join('')}</div>`;
-  const body = { monthly: reportMonthly, due: reportDue, changes: reportChanges, herd: reportHerd }[S.reportTab] || reportMonthly;
+  const body = { monthly: reportMonthly, due: reportDue, herd: reportHerd }[S.reportTab];
   return `${tabs}<div id="report-panel" role="tabpanel" aria-labelledby="rt-${S.reportTab}" class="grid" style="gap:20px">${body()}</div>`;
 }
 function afterReports() {
   const sel = $('#rep-month');
   if (sel) sel.addEventListener('change', () => { S.reportMonth = sel.value; renderView(); });
-  const cq = $('#chg-q');
-  if (cq) cq.addEventListener('input', () => { S.changeQ = cq.value; const b = $('#chg-body'); if (b) b.innerHTML = changeRows(); });
 }
 
 /* monthly AVS summary */
@@ -106,27 +105,6 @@ function reportDue() {
   const up = upcoming(60);
   return `<div class="toolbar"><p class="lede" style="margin:0">Everything overdue (up to 30 days) and due in the next 60 days.</p><span class="spacer"></span><button class="btn" data-action="pdf-due">${icon('pdf')}Save as PDF</button></div>
     <section class="panel"><div class="list">${up.length ? up.map(dueRow).join('') : '<div class="panel-b muted">Nothing is due.</div>'}</div></section>`;
-}
-
-/* change history */
-function changeRows() {
-  const t = S.db[CHANGE_TAB];
-  if (!t) return '';
-  const q = (S.changeQ || '').trim().toLowerCase();
-  const rows = t.rows.slice().reverse().filter(r => !q || r.v.join(' ').toLowerCase().includes(q)).slice(0, 300);
-  if (!rows.length) return `<tr><td colspan="6" class="muted">${q ? 'No changes match.' : 'No changes yet.'}</td></tr>`;
-  const g = (r, h) => cell(t, r, h);
-  return rows.map(r => {
-    const act = g(r, 'Action');
-    const what = act === 'Edited' ? `<b>${esc(g(r, 'Field'))}</b>: <span class="before">${esc(g(r, 'Before') || '(blank)')}</span> → ${esc(g(r, 'After') || '(blank)')}` : esc(g(r, 'After'));
-    return `<tr><td class="num">${esc(g(r, 'Time'))}</td><td>${esc(g(r, 'Person'))}</td><td><span class="pill ${act === 'Added' ? 'acc' : ''}">${esc(act)}</span></td><td>${esc(g(r, 'Tab'))}${g(r, 'Row') ? ` <span class="muted">row ${esc(g(r, 'Row'))}</span>` : ''}</td><td>${esc(g(r, 'Dog'))}</td><td class="wrap">${what}</td></tr>`;
-  }).join('');
-}
-function reportChanges() {
-  if (S.bridgeVersion < NEED_BRIDGE) return `<div class="empty"><h2>Change history needs the bridge update</h2><p>Once your bridge script is updated, every save made in the app is recorded with who made it and what changed, in a new “${CHANGE_TAB}” tab.</p><div class="row"><button class="btn primary" data-action="bridge-help">Show me how</button></div></div>`;
-  if (!S.db[CHANGE_TAB]) return `<div class="empty"><h2>No changes yet</h2><p>Every save made in the app will be listed here, with who made it and what changed. They are also kept in the “${CHANGE_TAB}” tab of your sheet.</p></div>`;
-  return `<div class="toolbar"><label class="search"><span class="sr">Search changes</span>${icon('search')}<input class="inp" id="chg-q" placeholder="Search by dog, person, tab or value" value="${esc(S.changeQ || '')}" autocomplete="off"></label><span class="muted small">Latest 300 shown. The full history is in the “${CHANGE_TAB}” tab.</span></div>
-    <div class="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What</th><th>Where</th><th>Dog</th><th>Details</th></tr></thead><tbody id="chg-body">${changeRows()}</tbody></table></div>`;
 }
 
 /* herd summary */

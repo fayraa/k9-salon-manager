@@ -91,11 +91,11 @@ function viewSettings() {
   ${WEB ? '' : phoneSectionHTML()}
   ${WEB ? `<section class="set" id="set-updates"><h2>About</h2>
     <dl class="kv"><dt>This version</dt><dd>${esc(S.version || '—')}</dd><dt>Updates</dt><dd>${u.state === 'ready' ? `Version ${esc(u.version)} is ready` : 'The newest version loads each time the app opens'}</dd></dl>
-    <div class="row">${u.state === 'ready' ? '<button class="btn primary" data-action="update-install">Reload now</button>' : ''}${device().canInstall ? `<button class="btn" data-action="install-app">${icon('plus')}Add to home screen</button>` : ''}</div>
+    <div class="row">${u.state === 'ready' ? '<button class="btn primary" data-action="update-install">Reload now</button>' : ''}<button class="btn" data-action="news" data-which="all">${icon('spark')}What’s new</button>${device().canInstall ? `<button class="btn" data-action="install-app">${icon('plus')}Add to home screen</button>` : ''}</div>
   </section>` : `<section class="set" id="set-updates"><h2>Updates</h2>
     <dl class="kv"><dt>This version</dt><dd>${esc(S.version || '—')}</dd><dt>Status</dt><dd>${esc(upText)}</dd></dl>
     ${toggle('p-auto', 'Download updates automatically', P.autoUpdate, 'New versions download in the background. You choose when to restart.')}
-    <div class="row"><button class="btn" data-action="update-check">${icon('sync')}Check for updates</button>${u.state === 'ready' ? '<button class="btn primary" data-action="update-install">Restart and update</button>' : ''}</div>
+    <div class="row"><button class="btn" data-action="update-check">${icon('sync')}Check for updates</button><button class="btn" data-action="news" data-which="${u.state === 'ready' || u.state === 'available' ? 'ready' : 'all'}">${icon('spark')}What’s new${u.state === 'ready' || u.state === 'available' ? ` in ${esc(u.version)}` : ''}</button>${u.state === 'ready' ? '<button class="btn primary" data-action="update-install">Restart and update</button>' : ''}</div>
   </section>`}
   </div></div>`;
 }
