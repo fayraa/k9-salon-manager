@@ -36,7 +36,7 @@ const LOGS = [
   { tab: 'Visitor Log', group: 'facility', label: 'Visitors', noun: 'visit', date: 'Date', sum: ['Visitor Name', 'Purpose of Visit'] },
   { tab: 'Form_Responses', group: 'facility', label: 'Visitor declarations', noun: 'declaration', date: 'Timestamp', readOnly: true, sum: ['Name', 'Reasons for visiting'] },
   { tab: 'AVS Submissions', group: 'facility', label: 'AVS submissions', noun: 'AVS submission', date: 'Date Submitted', sum: ['Month', 'Submitted By'] },
-  { tab: 'Kennels', group: 'facility', label: 'Kennels', noun: 'kennel', sum: ['Type', 'Capacity'], hide: ['Block'] },
+  { tab: 'Kennels', group: 'facility', label: 'Kennels', noun: 'kennel', sum: ['Capacity'], hide: ['Block', 'Type'] },
   { tab: 'Farm Info', group: 'facility', label: 'Farm details', noun: 'farm detail', sum: ['Field', 'Value'] },
 ];
 const LOG = Object.fromEntries(LOGS.map(l => [l.tab, l]));

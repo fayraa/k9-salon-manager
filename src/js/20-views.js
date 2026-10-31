@@ -143,12 +143,12 @@ function kennelList() {
     const no = String(cell(t, r, 'Kennel No.')).trim();
     if (!no) continue;
     const capRaw = cell(t, r, 'Capacity');
-    out.push({ no, capacity: capRaw !== '' && isFinite(+capRaw) ? +capRaw : null, type: cell(t, r, 'Type'), notes: cell(t, r, 'Notes'), row: r });
+    out.push({ no, capacity: capRaw !== '' && isFinite(+capRaw) ? +capRaw : null, row: r });
   }
   const known = new Set(out.map(k => k.no));
   const extra = Array.from(new Set(DOGS.filter(isActive).map(d => d.kennel).filter(k => k && !known.has(k))));
-  extra.forEach(no => out.push({ no, capacity: null, type: '', notes: '', missing: true }));
-  // kennels are one list in number order (the sheet's Block column, if it has one, isn't used)
+  extra.forEach(no => out.push({ no, capacity: null, missing: true }));
+  // kennels are one list in number order, shown by number only (the sheet's Block and Type columns aren't used)
   const num = k => (isFinite(parseFloat(k.no)) ? parseFloat(k.no) : Infinity);
   return out.sort((a, b) => (num(a) - num(b)) || a.no.localeCompare(b.no, undefined, { numeric: true }));
 }
@@ -164,9 +164,9 @@ function kennelsHTML() {
     const over = k.capacity != null && n > k.capacity;
     const pct = k.capacity ? Math.min(100, n / k.capacity * 100) : 0;
     return `<section class="kennel${over ? ' over' : ''}" aria-label="Kennel ${esc(k.no)}">
-      <div class="kn-h"><h3>Kennel ${esc(k.no)}</h3>${k.type ? `<span class="pill">${esc(k.type)}</span>` : ''}${over ? '<span class="pill crit">Over capacity</span>' : ''}</div>
+      <div class="kn-h"><h3>Kennel ${esc(k.no)}</h3>${over ? '<span class="pill crit">Over capacity</span>' : ''}</div>
       <div class="kn-cap"><span>${k.capacity != null ? `${n} of ${k.capacity}` : plural(n, 'dog')}</span>${k.capacity ? `<span class="bar-track" aria-hidden="true"><span class="bar-fill" style="display:block;width:${pct.toFixed(0)}%"></span></span>` : ''}</div>
-      ${k.missing ? '<p class="muted small">Used on dogs but not in the Kennels tab.</p>' : ''}${k.notes ? `<p class="muted small">${esc(k.notes)}</p>` : ''}
+      ${k.missing ? '<p class="muted small">Used on dogs but not in the Kennels tab.</p>' : ''}
       <div class="kn-dogs">${dogs.map(d => `<button class="dogchip" data-action="open-dog" data-chip="${esc(d.chip)}" data-id="${esc(d.id)}">${esc(dogName(d))}<small>${esc(sexWord(d.sex).charAt(0))}</small></button>`).join('') || '<span class="muted small">Empty</span>'}</div>
       <button class="btn sm ghost" data-action="move-dog" data-kennel="${esc(k.no)}">${icon('move')}Move a dog here</button>
     </section>`;

@@ -1045,7 +1045,7 @@ test('every page scrolls only as far as its content, with no empty space below',
   await ctx.close();
 });
 
-test('kennels are one list in number order, with no blocks anywhere', async () => {
+test('kennels are one list in number order, shown by number only: no blocks or labels', async () => {
   const read = readResponse({ version: 2 });
   const k = read.tabs['Kennels'];
   k.rows = [['10', 'Block A', 2, 'Breeding'], ['2', 'Block B', 3, 'Breeding'], ['1', 'Block B', 3, 'Whelping'], ['3', '', 2, 'Isolation', 'Sick dogs']].map((v, i) => ({ r: i + 2, v }));
@@ -1057,20 +1057,22 @@ test('kennels are one list in number order, with no blocks anywhere', async () =
   // kennel 4 is used on dogs but missing from the tab, and still takes its place in the order
   assert.deepEqual(await page.locator('.kennel h3').allTextContents(), ['Kennel 1', 'Kennel 2', 'Kennel 3', 'Kennel 4', 'Kennel 10']);
   assert.equal(await page.locator('#view .sec-title').count(), 0, 'no block headings');
-  assert.doesNotMatch(await page.textContent('#view'), /Block/);
+  assert.doesNotMatch(await page.textContent('#view'), /Block|Breeding|Whelping|Isolation|Sick dogs/, 'no blocks, labels or notes: just the kennel numbers');
+  assert.equal(await page.locator('.kennel .kn-h .pill:not(.crit)').count(), 0);
   // the Kennels tab: no Block column in the list or the form, and the cell in the sheet is left alone
   await page.click('.nav button[data-view="records"]');
   await page.click('[data-action="nav"][data-view="log"][data-tab="Kennels"]');
   await page.waitForSelector('#log-table th');
-  assert.ok(!(await page.locator('#log-table th').allTextContents()).includes('Block'));
+  const cols = await page.locator('#log-table th').allTextContents();
+  assert.ok(!cols.includes('Block') && !cols.includes('Type'), 'no Block or Type column');
   await page.click('#log-table tbody tr >> nth=0');
   await page.waitForSelector('form.mcard');
-  assert.ok(!(await page.locator('form.mcard label').allTextContents()).some(t => /Block/.test(t)), 'no Block field');
+  assert.ok(!(await page.locator('form.mcard label').allTextContents()).some(t => /Block|Type/.test(t)), 'no Block or Type field');
   await page.fill('form.mcard label:has-text("Capacity") + input', '4');
   await page.click('#form-save');
   await page.waitForFunction(() => window.__k9.calls.some(c => c.action === 'save'));
   const save = (await page.evaluate(() => window.__k9.calls)).find(c => c.action === 'save');
-  assert.deepEqual(save.changes.map(c => c.h), ['Capacity'], 'only the capacity is sent; the block stays as it is');
+  assert.deepEqual(save.changes.map(c => c.h), ['Capacity'], 'only the capacity is sent; the block and type stay as they are');
   // Log for many dogs picks kennels by number only
   await page.click('.nav button[data-view="records"]');
   await page.click('#top-act [data-action="bulk"]');
