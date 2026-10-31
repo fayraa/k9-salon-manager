@@ -8,7 +8,7 @@
 - **History** has its own place in the menu. It lists every change saved in the app, newest first and by day, with who made it. Each change is one entry with what was changed, from and to. Filter by person or kind of change, or search. Tap a dog's name to open it. Easy to read on a phone too.
 
 **Changed**
-- **Kennels** are one list in number order, shown just by their kennel number: no blocks, and no labels such as Breeding or Whelping. The Block and Type columns are no longer shown in kennel forms or lists. Anything already in them stays in your sheet, untouched.
+- **Kennels** are one list in number order, shown just by their kennel number and how many dogs are in them: no blocks, no labels such as Breeding or Whelping, and no over-capacity warning. The Block and Type columns are no longer shown in kennel forms or lists. Anything already in them stays in your sheet, untouched.
 
 **Fixed**
 - A photo added to a dog could disappear again a moment later, usually on a phone. This happened when the app refreshed from the sheet while the photo was uploading. The same could briefly hide a record you had just saved. The app now waits and refreshes again, so what you save stays on screen.

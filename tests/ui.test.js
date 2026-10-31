@@ -1058,7 +1058,9 @@ test('kennels are one list in number order, shown by number only: no blocks or l
   assert.deepEqual(await page.locator('.kennel h3').allTextContents(), ['Kennel 1', 'Kennel 2', 'Kennel 3', 'Kennel 4', 'Kennel 10']);
   assert.equal(await page.locator('#view .sec-title').count(), 0, 'no block headings');
   assert.doesNotMatch(await page.textContent('#view'), /Block|Breeding|Whelping|Isolation|Sick dogs/, 'no blocks, labels or notes: just the kennel numbers');
-  assert.equal(await page.locator('.kennel .kn-h .pill:not(.crit)').count(), 0);
+  assert.equal(await page.locator('.kennel .kn-h .pill').count(), 0, 'no labels or warnings on a kennel');
+  assert.doesNotMatch(await page.textContent('#view'), /Over capacity/);
+  assert.equal(await page.textContent('.kennel:has(h3:text-is("Kennel 1")) .kn-cap'), '5 of 3', 'the count still shows how full it is');
   // the Kennels tab: no Block column in the list or the form, and the cell in the sheet is left alone
   await page.click('.nav button[data-view="records"]');
   await page.click('[data-action="nav"][data-view="log"][data-tab="Kennels"]');

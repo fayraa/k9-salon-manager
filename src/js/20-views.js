@@ -161,10 +161,10 @@ function kennelsHTML() {
   const card = k => {
     const dogs = (by[k.no] || []).sort((a, b) => dogName(a).localeCompare(dogName(b)));
     const n = dogs.length;
-    const over = k.capacity != null && n > k.capacity;
     const pct = k.capacity ? Math.min(100, n / k.capacity * 100) : 0;
-    return `<section class="kennel${over ? ' over' : ''}" aria-label="Kennel ${esc(k.no)}">
-      <div class="kn-h"><h3>Kennel ${esc(k.no)}</h3>${over ? '<span class="pill crit">Over capacity</span>' : ''}</div>
+    // the count says how full it is ("5 of 3"); no warnings or labels on the kennel itself
+    return `<section class="kennel" aria-label="Kennel ${esc(k.no)}">
+      <div class="kn-h"><h3>Kennel ${esc(k.no)}</h3></div>
       <div class="kn-cap"><span>${k.capacity != null ? `${n} of ${k.capacity}` : plural(n, 'dog')}</span>${k.capacity ? `<span class="bar-track" aria-hidden="true"><span class="bar-fill" style="display:block;width:${pct.toFixed(0)}%"></span></span>` : ''}</div>
       ${k.missing ? '<p class="muted small">Used on dogs but not in the Kennels tab.</p>' : ''}
       <div class="kn-dogs">${dogs.map(d => `<button class="dogchip" data-action="open-dog" data-chip="${esc(d.chip)}" data-id="${esc(d.id)}">${esc(dogName(d))}<small>${esc(sexWord(d.sex).charAt(0))}</small></button>`).join('') || '<span class="muted small">Empty</span>'}</div>
