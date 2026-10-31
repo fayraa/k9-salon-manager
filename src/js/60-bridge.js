@@ -23,9 +23,16 @@ function deskText(res) {
   if (['no_column', 'invalid', 'refused'].includes(code) && res.message) return res.message;
   return DESK_COPY[code] || (res && res.message) || 'Something went wrong talking to Google Sheets.';
 }
+// calls that change the sheet. writeSeq goes up when one starts and again when it ends, so a read that was on its
+// way at the same time can tell its copy may be missing the change (and would undo it on screen).
+const WRITES = ['save', 'batch', 'settings_set', 'photo_upload', 'doc_upload', 'doc_remove'];
+let writeSeq = 0, writing = 0;
 async function deskCall(payload) {
+  const write = WRITES.includes(payload && payload.action);
+  if (write) { writeSeq++; writing++; }
   try { return await window.k9.call(Object.assign({ who: S.prefs.who || '' }, payload)); }
   catch (e) { return { ok: false, error: 'network', message: String((e && e.message) || e) }; }
+  finally { if (write) { writeSeq++; writing--; } }
 }
 const wanted = () => [MASTER, ...LOGS.map(l => l.tab), CHANGE_TAB];
 // newest rows only, for tabs that grow every day
@@ -74,9 +81,19 @@ function deskLoad() {
   if (deskLoading) return deskLoading;
   const gen = loadGen;
   const p = deskLoading = (async () => {
-    const res = await deskCall({ action: 'read', tabs: wanted(), limits: READ_LIMITS, v: 2 });
+    let res;
+    for (let tries = 1; ; tries++) {
+      const seq = writeSeq;
+      res = await deskCall({ action: 'read', tabs: wanted(), limits: READ_LIMITS, v: 2 });
+      if (gen !== loadGen) { if (deskLoading === p) deskLoading = null; return; } // the connection changed while this was loading
+      if (!res || !res.ok || seq === writeSeq) break;
+      // something was saved while this read was on its way (a photo added as the app came back on screen, say), so
+      // this copy may not have it. Showing it would make the change look lost: read again once saving has finished.
+      while (writing && gen === loadGen) await sleep(300);
+      if (gen !== loadGen) { if (deskLoading === p) deskLoading = null; return; }
+      if (tries >= 4) { if (deskLoading === p) deskLoading = null; scheduleRefresh(5000); return; } // keep what's on screen; try again shortly
+    }
     if (deskLoading === p) deskLoading = null;
-    if (gen !== loadGen) return; // the connection changed while this was loading
     if (!res || !res.ok) {
       const code = (res && res.error) || 'network';
       if (code === 'not_setup') { S.conn = { state: 'setup', code, msg: DESK_COPY.not_setup, at: 0 }; renderAll(); return; }
@@ -107,7 +124,7 @@ function applyDb(db, at) {
   const typing = active && $('#view').contains(active) && /INPUT|SELECT|TEXTAREA/.test(active.tagName);
   if (typing) { renderNav(); renderSync(); renderTop(); renderBanners(); afterViewRender(); refreshDrawer(); }
   else renderAll();
-  if (first) dailyNotice();
+  if (first) { dailyNotice(); newsAfterUpdate(); }
 }
 function dailyNotice() {
   if (WEB || !S.prefs.notify || store.get('k9.notified') === isoD(TODAY)) return; // phones get the daily email instead

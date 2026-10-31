@@ -16,6 +16,7 @@ const { chromium } = require('playwright');
 const jsQR = require('jsqr');
 const { readResponse, chip } = require('./fixture');
 const { Sheet_, Spreadsheet_, loadBridge, Utilities } = require('./gas-mock');
+const { version: VERSION } = require('../package.json');
 
 const WEB = path.join(__dirname, '..', 'web');
 const KEY = 'k'.repeat(40);
@@ -26,7 +27,7 @@ const TYPES = { html: 'text/html', css: 'text/css', js: 'application/javascript'
 const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
 
 let browser, server, google, ORIGIN, TMP;
-const G = { bridges: {}, calls: [], replies: new Map(), mode: 'ok', slowRead: {}, siteDown: false };
+const G = { bridges: {}, calls: [], replies: new Map(), mode: 'ok', slowRead: {}, lateRead: {}, siteDown: false };
 /** Starts Chromium with script.google.com and script.googleusercontent.com pointed at the stand-in for Google. */
 function launch(extraArgs = []) {
   const port = google.address().port;
@@ -56,16 +57,21 @@ test.before(async () => {
       if (G.mode === 'signin') { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<html>Sign in to continue to Google Apps Script</html>'); return; } // "Who has access" isn't set to Anyone
       let payload = null;
       try { payload = JSON.parse(body); } catch (e) { /* left as null */ }
-      G.calls.push({ at, payload, contentType: req.headers['content-type'], cookie: req.headers.cookie || '', origin: req.headers.origin || '' });
-      const reply = () => {
+      G.calls.push({ at, payload, contentType: req.headers['content-type'], cookie: req.headers.cookie || '', origin: req.headers.origin || '', t: Date.now() });
+      const answer = () => {
         const out = bridge.ctx.doPost({ postData: { contents: body } }).getContent();
         const id = `r${G.replies.size + 1}`;
         G.replies.set(id, out);
-        res.writeHead(302, { Location: `https://script.googleusercontent.com/macros/echo?user_content_key=${id}&lib=TEST`, 'Access-Control-Allow-Origin': '*' });
-        res.end();
+        return () => {
+          res.writeHead(302, { Location: `https://script.googleusercontent.com/macros/echo?user_content_key=${id}&lib=TEST`, 'Access-Control-Allow-Origin': '*' });
+          res.end();
+        };
       };
-      const slow = payload && payload.action === 'read' ? G.slowRead[at] || 0 : 0;
-      if (slow) setTimeout(reply, slow); else reply();
+      const isRead = payload && payload.action === 'read';
+      const slow = isRead ? G.slowRead[at] || 0 : 0, late = isRead ? G.lateRead[at] || 0 : 0;
+      if (late) { const send = answer(); setTimeout(send, late); } // the sheet is read now, and the answer arrives later
+      else if (slow) setTimeout(() => answer()(), slow);
+      else answer()();
     });
   });
   await new Promise(r => google.listen(0, '127.0.0.1', r));
@@ -106,12 +112,13 @@ function sheetFromFixture() {
 async function openPhone(opts = {}) {
   const ss = opts.ss || sheetFromFixture();
   const bridge = opts.bridge || loadBridge(ss);
-  G.bridges = Object.assign({ [BRIDGE]: bridge }, opts.bridges || {}); G.calls = []; G.mode = 'ok'; G.slowRead = opts.slowRead || {}; G.siteDown = false;
+  G.bridges = Object.assign({ [BRIDGE]: bridge }, opts.bridges || {}); G.calls = []; G.mode = 'ok'; G.slowRead = opts.slowRead || {}; G.lateRead = {}; G.siteDown = false;
   const calls = G.calls;
   const ctx = await (opts.browser || browser).newContext(Object.assign({}, PHONE, { serviceWorkers: opts.sw || 'block', ignoreHTTPSErrors: true }, opts.context || {}));
   if (opts.prefs !== null) {
     const prefs = opts.prefs || { url: BRIDGE, key: KEY, who: 'Sam Tester' };
-    await ctx.addInitScript(p => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('k9.prefs', JSON.stringify(p)); sessionStorage.setItem('seeded', '1'); } }, prefs);
+    // seen: the version whose notes were last shown on this phone, so What's new opens only in the test about it
+    await ctx.addInitScript(([p, seen]) => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('k9.prefs', JSON.stringify(p)); if (seen) localStorage.setItem('k9.seenVersion', seen); sessionStorage.setItem('seeded', '1'); } }, [prefs, opts.seen === undefined ? VERSION : opts.seen]);
   }
   const page = await ctx.newPage();
   const errors = [];
@@ -314,6 +321,80 @@ test('on a phone, a vaccination logged from a dog’s profile is written to the 
   assert.ok(save.payload.opId, 'retry-safe, as on the computer');
   const log = ss.getSheetByName('App Change Log');
   assert.ok(log && log.getLastRow() >= 2, 'the change history records it');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+/** Waits for something the stand-in for Google sees (a call arriving, say). */
+async function until(fn, ms = 10000, what = 'the condition') {
+  const end = Date.now() + ms;
+  while (!fn()) { if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`); await new Promise(r => setTimeout(r, 50)); }
+}
+test('a photo added while the app is refreshing stays on the dog, and so does a record saved then', async () => {
+  const { page, ctx, errors, calls, ss } = await openPhone();
+  await openDogCard(page, 'Pepper');
+  assert.match(await page.textContent('.drawer .dr-actions'), /Add photo/);
+  const reads = () => calls.filter(c => c.payload && c.payload.action === 'read').length;
+  // back on screen after a few minutes away (choosing a photo, say), the app refreshes from the sheet. Google takes
+  // its copy of the sheet straight away, but the answer is slow to arrive.
+  G.lateRead[BRIDGE] = 3000;
+  let before = reads();
+  await page.evaluate(() => { const now = Date.now; Date.now = () => now() + 5 * 60000; document.dispatchEvent(new Event('visibilitychange')); });
+  await until(() => reads() === before + 1, 5000, 'the refresh');
+  // the photo is chosen at the same moment, so it uploads while that refresh is on its way
+  await page.setInputFiles('#photo-in', await photo(page, 'Pepper'));
+  await page.waitForSelector('#dr-photo img', { timeout: 15000 });
+  const filed = ss.getSheetByName('App Photos').getRange(2, 1, 1, 2).getValues()[0];
+  assert.equal(String(filed[0]), chip(2), 'the real bridge files the photo under her microchip');
+  G.lateRead[BRIDGE] = 0;
+  // the refresh then arrives without the photo in it: the app reads again rather than show that copy
+  const lastRead = () => calls.filter(c => c.payload && c.payload.action === 'read').pop();
+  await until(() => Date.now() > lastRead().t + 4500, 8000, 'the slow refresh to arrive');
+  assert.equal(await page.locator('#dr-photo img').count(), 1, 'the photo is still on her profile');
+  assert.ok(reads() >= before + 2, 'the app read the sheet again');
+  assert.match(await page.textContent('.drawer .dr-actions'), /Change photo/);
+  await page.click('.drawer [data-action="close-top"]');
+  await openDogCard(page, 'Pepper');
+  await page.waitForSelector('#dr-photo img', { timeout: 10000 });
+
+  // the same for a record: saved while a refresh is on its way, it stays in her history
+  G.lateRead[BRIDGE] = 3000;
+  before = reads();
+  await page.evaluate(() => { const now = Date.now; Date.now = () => now() + 5 * 60000; document.dispatchEvent(new Event('visibilitychange')); });
+  await until(() => reads() === before + 1, 5000, 'the refresh');
+  await page.click('.drawer [data-action="new-entry"][data-tab="Vaccinations"]');
+  await page.waitForSelector('form.mcard');
+  await page.fill('form.mcard label:has-text("Date Given") + input', '2026-10-20');
+  await page.fill('form.mcard label:has-text("Vaccine Type") + input', 'Leptospirosis');
+  await page.click('#form-save');
+  await page.waitForSelector('form.mcard', { state: 'detached' });
+  G.lateRead[BRIDGE] = 0;
+  const slowOne = calls.filter(c => c.payload && c.payload.action === 'read')[before];
+  await until(() => Date.now() > slowOne.t + 4500, 8000, 'the slow refresh to arrive');
+  assert.match(await page.textContent('.drawer .tl'), /Leptospirosis/, 'the vaccination is still listed');
+  assert.ok(reads() >= before + 2, 'the app read the sheet again');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('after an update the phone shows what’s new once, and keeps only which version that was', async () => {
+  const { page, ctx, errors } = await openPhone({ seen: '1.4.0', wait: '.news' });
+  assert.equal(await page.textContent('.mcard h2'), `What’s new in version ${VERSION}`);
+  const versions = await page.locator('.news h3').allTextContents();
+  assert.equal(versions[0], `Version ${VERSION}`);
+  assert.equal(versions[versions.length - 1], 'Version 1.4.1', 'everything since the version used last');
+  const fits = await page.evaluate(() => { const m = document.querySelector('.mcard').getBoundingClientRect(); return m.left >= 0 && m.right <= innerWidth + 1; });
+  assert.ok(fits, 'the window fits the phone');
+  await page.click('.mcard .m-f [data-action="close-top"]');
+  const kept = await page.evaluate(() => Object.keys(localStorage).sort());
+  assert.deepEqual(kept.filter(k => !['k9.prefs', 'k9.view', 'k9.tab', 'k9.dogsMode', 'k9.installHint'].includes(k)), ['k9.seenVersion'], 'no records, just the version');
+  assert.equal(await page.evaluate(() => localStorage.getItem('k9.seenVersion')), VERSION);
+  await page.waitForSelector('.mcard', { state: 'detached' });
+  await page.waitForTimeout(200); // closing it steps the phone's history back
+  await page.goto(`${ORIGIN}/k9/`);
+  await page.waitForSelector('.quick');
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.news').count(), 0, 'once');
   assert.deepEqual(errors, []);
   await ctx.close();
 });

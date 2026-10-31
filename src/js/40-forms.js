@@ -113,7 +113,7 @@ function openForm({ tab, mode, row, preset = {} }) {
   const readOnly = !!L.readOnly;
   const isMaster = tab === MASTER;
   const computed = computedCols(tab);
-  const cols = t.headers.map((h, c) => c).filter(c => t.headers[c]);
+  const cols = t.headers.map((h, c) => c).filter(c => t.headers[c] && !hiddenCol(L, t.headers[c]));
   const vals = {};
   cols.forEach(c => { vals[c] = row ? (row.v[c] || '') : ''; });
   if (mode === 'new') {

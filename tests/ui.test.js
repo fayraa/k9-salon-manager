@@ -20,6 +20,8 @@ function stub(opts) {
   return `(() => {
     const O = ${JSON.stringify(opts)};
     const S = window.__k9 = { calls: [], prefs: O.prefs, zoom: [], pdfs: [], copies: [], updateCb: null, serialCb: null };
+    // the version whose notes were last shown here (so What's new only opens in the tests about it)
+    try { if (!localStorage.getItem('k9.seenVersion') && O.seen !== null) localStorage.setItem('k9.seenVersion', O.seen || O.appVersion || '1.1.0'); } catch (e) { /* storage off */ }
     const clone = x => JSON.parse(JSON.stringify(x));
     window.Notification = function (t, o) { (S.notes = S.notes || []).push(o && o.body); };
     window.k9 = {
@@ -45,7 +47,7 @@ function stub(opts) {
       },
       copy: async t => { S.copies.push(t); return true; },
       bridgeScript: async () => "const SPREADSHEET_ID = '__SHEET_ID__';",
-      version: async () => '1.1.0',
+      version: async () => O.appVersion || '1.1.0',
       zoom: async f => { S.zoom.push(f); return f; },
       focus: async () => {},
       photo: async () => ({ ok: false }),
@@ -69,7 +71,7 @@ async function openApp(opts = {}) {
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-  await page.addInitScript(stub({ read: opts.read || readResponse({ version: opts.version || 2, settings: opts.settings }), prefs: Object.assign({ url: 'https://script.google.com/macros/s/TEST/exec', key: 'good-key', who: 'Sam Tester', notify: true }, opts.prefs || {}) }));
+  await page.addInitScript(stub({ seen: opts.seen, appVersion: opts.appVersion, read: opts.read || readResponse({ version: opts.version || 2, settings: opts.settings }), prefs: Object.assign({ url: 'https://script.google.com/macros/s/TEST/exec', key: 'good-key', who: 'Sam Tester', notify: true }, opts.prefs || {}) }));
   await page.route('http://app.test/**', async route => {
     const f = path.join(R, new URL(route.request().url()).pathname.slice(1) || 'index.html');
     if (!fs.existsSync(f)) return route.fulfill({ status: 404 });
@@ -81,7 +83,7 @@ async function openApp(opts = {}) {
 }
 
 test('first run shows the setup steps and connects with the right key', async () => {
-  const { page, errors, ctx, k9 } = await openApp({ setup: true, prefs: { url: '', key: '' } });
+  const { page, errors, ctx, k9 } = await openApp({ setup: true, seen: null, prefs: { url: '', key: '' } });
   await page.waitForSelector('#setup-form');
   assert.match(await page.textContent('#title'), /Set up/);
   await page.fill('#setup-sheet', 'https://docs.google.com/spreadsheets/d/ABCDEFGHIJKLMNOPQRSTUVWXYZ0123/edit');
@@ -96,6 +98,8 @@ test('first run shows the setup steps and connects with the right key', async ()
   await page.click('#setup-form button[type=submit]');
   await page.waitForSelector('.quick');
   assert.equal((await k9()).prefs.key, 'good-key');
+  assert.equal(await page.locator('.mcard').count(), 0, 'a new install doesn’t open What’s new');
+  assert.equal(await page.evaluate(() => localStorage.getItem('k9.seenVersion')), '1.1.0', 'but notes the version, for the next update');
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -275,7 +279,7 @@ test('a single record form saves, and blocks when a required date is missing', a
   await ctx.close();
 });
 
-test('reports: monthly summary, PDF, mark as submitted, and change history', async () => {
+test('reports: monthly summary, PDF, mark as submitted, and the herd summary', async () => {
   const { page, errors, ctx, k9 } = await openApp();
   await page.click('.nav button[data-view="reports"]');
   await page.waitForSelector('#rep-month');
@@ -292,9 +296,7 @@ test('reports: monthly summary, PDF, mark as submitted, and change history', asy
   assert.match(month, /\w+ \d{4}/);
   await page.keyboard.press('Escape');
   await page.click('[data-action="guard-discard"]').catch(() => {});
-  await page.click('[data-action="report-tab"][data-tab="changes"]');
-  await page.waitForSelector('#chg-body');
-  assert.match(await page.textContent('#chg-body'), /Sam Tester/);
+  assert.equal(await page.locator('[data-action="report-tab"][data-tab="changes"]').count(), 0, 'change history has moved to History');
   await page.click('[data-action="report-tab"][data-tab="herd"]');
   await page.waitForSelector('.bars');
   assert.deepEqual(errors, []);
@@ -366,7 +368,7 @@ test('a downloaded update shows a restart notice', async () => {
 
 test('the narrowest window has no sideways scrolling', async () => {
   const { page, errors, ctx } = await openApp({ viewport: { width: 900, height: 700 } });
-  for (const v of ['home', 'dogs', 'breeding', 'records', 'reports', 'settings']) {
+  for (const v of ['home', 'dogs', 'breeding', 'records', 'reports', 'history', 'settings']) {
     await page.evaluate(view => { document.querySelector(`.nav button[data-view="${view}"]`).click(); }, v);
     await page.waitForTimeout(80);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -1039,6 +1041,186 @@ test('every page scrolls only as far as its content, with no empty space below',
     assert.ok(r.window <= 0, `${v}: the window itself doesn't scroll (${r.window}px)`);
     assert.ok(r.below <= r.pad + 1, `${v}: ${r.below}px below the last item`);
   }
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('kennels are one list in number order, with no blocks anywhere', async () => {
+  const read = readResponse({ version: 2 });
+  const k = read.tabs['Kennels'];
+  k.rows = [['10', 'Block A', 2, 'Breeding'], ['2', 'Block B', 3, 'Breeding'], ['1', 'Block B', 3, 'Whelping'], ['3', '', 2, 'Isolation', 'Sick dogs']].map((v, i) => ({ r: i + 2, v }));
+  k.lastRow = 5;
+  const { page, errors, ctx } = await openApp({ read });
+  await page.click('.nav button[data-view="dogs"]');
+  await page.click('[data-action="dogs-mode"][data-mode="kennels"]');
+  await page.waitForSelector('.kennel');
+  // kennel 4 is used on dogs but missing from the tab, and still takes its place in the order
+  assert.deepEqual(await page.locator('.kennel h3').allTextContents(), ['Kennel 1', 'Kennel 2', 'Kennel 3', 'Kennel 4', 'Kennel 10']);
+  assert.equal(await page.locator('#view .sec-title').count(), 0, 'no block headings');
+  assert.doesNotMatch(await page.textContent('#view'), /Block/);
+  // the Kennels tab: no Block column in the list or the form, and the cell in the sheet is left alone
+  await page.click('.nav button[data-view="records"]');
+  await page.click('[data-action="nav"][data-view="log"][data-tab="Kennels"]');
+  await page.waitForSelector('#log-table th');
+  assert.ok(!(await page.locator('#log-table th').allTextContents()).includes('Block'));
+  await page.click('#log-table tbody tr >> nth=0');
+  await page.waitForSelector('form.mcard');
+  assert.ok(!(await page.locator('form.mcard label').allTextContents()).some(t => /Block/.test(t)), 'no Block field');
+  await page.fill('form.mcard label:has-text("Capacity") + input', '4');
+  await page.click('#form-save');
+  await page.waitForFunction(() => window.__k9.calls.some(c => c.action === 'save'));
+  const save = (await page.evaluate(() => window.__k9.calls)).find(c => c.action === 'save');
+  assert.deepEqual(save.changes.map(c => c.h), ['Capacity'], 'only the capacity is sent; the block stays as it is');
+  // Log for many dogs picks kennels by number only
+  await page.click('.nav button[data-view="records"]');
+  await page.click('#top-act [data-action="bulk"]');
+  await page.waitForSelector('#bk-kennel');
+  assert.deepEqual(await page.locator('#bk-kennel option').allTextContents(), ['Any kennel', 'Kennel 1', 'Kennel 2', 'Kennel 3', 'Kennel 4', 'Kennel 10']);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+/** A change log with a few kinds of change over three days, oldest first as the sheet keeps it. */
+function historyRead(who) {
+  const read = readResponse({ version: 2 });
+  const t = read.tabs['App Change Log'];
+  const lines = [
+    ['2026-10-01 09:00', 'Sam Tester', 'Edited', 'All Breeds', 3, 'Mochi (T002)', 'Kennel No.', '1', '2'],
+    [`${ago(1)} 14:05`, 'Robin Test', 'Added', 'Vaccinations', 4, 'Biscuit (T001)', '', '', `Microchip No.: ${chip(0)} · Vaccine Type: Rabies`],
+    [`${ago(0)} 10:30`, 'Robin Test', 'Edited', 'Vaccinations', 2, 'Biscuit (T001)', 'Next Due Date', '2026-11-01', '2026-12-01'],
+    [`${ago(0)} 10:30`, 'Robin Test', 'Edited', 'Vaccinations', 2, 'Biscuit (T001)', 'Clinic', 'Test Clinic', '<b>Other</b> Clinic'],
+    [`${ago(0)} 11:00`, 'Sam Tester', 'Photo', 'App Photos', 2, 'Pepper (T003)', 'Photo', '', 'T003 Pepper.jpg'],
+    [`${ago(0)} 11:30`, '', 'Settings', '', '', '', 'App settings', '', 'Checks: licence on'],
+  ];
+  t.rows = lines.map((v, i) => ({ r: i + 2, v }));
+  t.lastRow = lines.length + 1;
+  return read;
+}
+test('History has its own place in the menu: changes by day, who made them, what changed, and filters', async () => {
+  const { page, errors, ctx } = await openApp({ read: historyRead() });
+  await page.click('.nav button[data-view="history"]');
+  await page.waitForSelector('.he');
+  assert.equal(await page.textContent('#title'), 'History');
+  const days = await page.locator('.hday h2').allTextContents();
+  assert.deepEqual(days.slice(0, 2), ['Today', 'Yesterday'], 'grouped by day, newest first');
+  assert.match(days[2], /^\w+day 1 Oct 2026$/);
+  const entries = await page.locator('.he').allTextContents();
+  assert.equal(entries.length, 5, 'the two lines of one save are one entry');
+  assert.match(entries[0], /Someone changed the app settings.*11:30/s);
+  assert.match(entries[1], /Sam Tester added a photo of Pepper/);
+  assert.match(entries[2], /Robin Test changed a vaccination for Biscuit/);
+  assert.equal(await page.locator('.he >> nth=2 >> .he-ch li').count(), 2);
+  assert.match(entries[2], /Next Due Date.*2026-11-01.*2026-12-01/s);
+  assert.match(entries[2], /<b>Other<\/b> Clinic/, 'values are shown as plain text');
+  assert.match(entries[3], /Robin Test added a vaccination for Biscuit.*Vaccine Type: Rabies/s);
+  assert.match(entries[4], /Sam Tester changed Mochi’s details/);
+  assert.equal(await page.textContent('#hist-count'), '5 changes');
+  // filters
+  await page.selectOption('#hist-who', 'Robin Test');
+  assert.equal(await page.locator('.he').count(), 2);
+  await page.selectOption('#hist-who', '');
+  await page.selectOption('#hist-kind', 'files');
+  assert.equal(await page.locator('.he').count(), 1);
+  await page.selectOption('#hist-kind', '');
+  await page.fill('#hist-q', 'mochi kennel');
+  assert.equal(await page.locator('.he').count(), 1);
+  await page.fill('#hist-q', 'nothing like this');
+  assert.match(await page.textContent('#hist-list'), /No changes match/);
+  await page.fill('#hist-q', '');
+  // a dog's name opens the dog
+  await page.click('.he >> nth=2 >> [data-action="open-dog"]');
+  await page.waitForSelector('.drawer h2');
+  assert.equal(await page.textContent('.drawer h2'), 'Biscuit');
+  await page.keyboard.press('Escape');
+  // Reports no longer has it, and search finds History
+  await page.click('.nav button[data-view="reports"]');
+  assert.equal(await page.locator('[data-action="report-tab"]').count(), 3);
+  await page.keyboard.press('Control+k');
+  await page.fill('#pal-q', 'who changed');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.he');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+test('History at phone width reads as a list, and asks for a name when this device has none', async () => {
+  const { page, errors, ctx } = await openApp({ read: historyRead(), viewport: { width: 390, height: 844 }, prefs: { who: '' } });
+  await page.evaluate(() => document.querySelector('[data-view="history"]').click());
+  await page.waitForSelector('.he');
+  assert.match(await page.textContent('#view .note'), /listed as “Someone” until you add your name/);
+  const fit = await page.evaluate(() => ({ main: document.querySelector('#main').scrollWidth <= document.querySelector('#main').clientWidth + 1, wide: [...document.querySelectorAll('.he *')].filter(el => el.getBoundingClientRect().right > innerWidth + 1).length }));
+  assert.deepEqual(fit, { main: true, wide: 0 }, 'nothing runs off the side');
+  await page.click('#view .note [data-action="nav"]');
+  await page.waitForSelector('#p-who');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('What’s new opens once after an update, with every version since the one used last', async () => {
+  const { page, errors, ctx } = await openApp({ seen: '1.0.0', appVersion: '1.3.0' });
+  await page.waitForSelector('.mcard h2');
+  assert.equal(await page.textContent('.mcard h2'), 'What’s new in version 1.3.0');
+  assert.deepEqual(await page.locator('.news h3').allTextContents(), ['Version 1.3.0', 'Version 1.2.0', 'Version 1.1.0']);
+  assert.match(await page.textContent('.news'), /Log for many dogs/);
+  assert.ok(await page.locator('.news li b').count() > 0, 'bold text in the changelog shows bold');
+  await page.click('.mcard [data-action="close-top"] >> text=OK');
+  assert.equal(await page.evaluate(() => localStorage.getItem('k9.seenVersion')), '1.3.0');
+  await page.reload();
+  await page.waitForSelector('.quick');
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.mcard').count(), 0, 'only once');
+  // Settings → Updates shows the latest versions any time
+  await page.click('.nav button[data-view="settings"]');
+  await page.click('#set-updates [data-action="news"]');
+  await page.waitForSelector('.news h3');
+  const versions = await page.locator('.news h3').allTextContents();
+  assert.equal(versions[0], `Version ${require('../package.json').version}`, 'the newest first');
+  assert.ok(versions.length >= 5);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+test('the first update since What’s new was added shows that version’s notes; a new install shows none', async () => {
+  const { page, errors, ctx } = await openApp({ seen: null, appVersion: '1.2.0' });
+  await page.waitForSelector('.news');
+  assert.equal(await page.textContent('.mcard h2'), 'What’s new in version 1.2.0');
+  assert.equal(await page.locator('.news section').count(), 1);
+  assert.match(await page.textContent('.news'), /Quick fill/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+test('a downloaded update: a Windows notification once, and What’s new from the banner before restarting', async () => {
+  const { page, errors, ctx, k9 } = await openApp();
+  const notes = '**New**\n- A **faster** list\n- <img src=x onerror=alert(1)> stays text\n\nPlain words.';
+  await page.evaluate(n => window.__k9.updateCb({ state: 'ready', version: '1.2.0', notes: n }), notes);
+  await page.waitForSelector('.banner.acc [data-action="news"]');
+  assert.match(await page.textContent('.banner.acc'), /Version 1\.2\.0 is ready/);
+  const said = (await k9()).notes.filter(n => /1\.2\.0/.test(n));
+  assert.equal(said.length, 1);
+  assert.match(said[0], /Version 1\.2\.0 is ready\. Restart the app/);
+  await page.evaluate(n => { window.__k9.updateCb({ state: 'idle' }); window.__k9.updateCb({ state: 'ready', version: '1.2.0', notes: n }); }, notes);
+  assert.equal((await k9()).notes.filter(n => /1\.2\.0/.test(n)).length, 1, 'once for each version');
+  await page.click('.banner.acc [data-action="news"]');
+  await page.waitForSelector('.news');
+  assert.equal(await page.textContent('.mcard h2'), 'What’s new in version 1.2.0');
+  assert.equal(await page.textContent('.news .nh'), 'New');
+  assert.equal(await page.textContent('.news li b'), 'faster');
+  assert.equal(await page.locator('.news img').count(), 0, 'the notes are text, never markup');
+  assert.match(await page.textContent('.news'), /<img src=x onerror=alert\(1\)> stays text/);
+  assert.equal(await page.locator('.mcard [data-action="update-install"]').count(), 1, 'restart from there');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.__k9.updateCb({ state: 'idle' }));
+  assert.equal(await page.locator('.banner.acc').count(), 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+test('with automatic downloads off, a new version is offered with its notes and a Download button', async () => {
+  const { page, errors, ctx } = await openApp({ prefs: { autoUpdate: false } });
+  await page.evaluate(() => window.__k9.updateCb({ state: 'available', version: '1.2.0', notes: '- Better' }));
+  await page.waitForSelector('.banner.acc');
+  assert.match(await page.textContent('.banner.acc'), /Version 1\.2\.0 is available/);
+  assert.equal(await page.locator('.banner.acc [data-action="update-check"]').count(), 1);
+  await page.click('.banner.acc [data-action="news"]');
+  await page.waitForSelector('.news li');
+  assert.equal(await page.textContent('.news li'), 'Better');
   assert.deepEqual(errors, []);
   await ctx.close();
 });

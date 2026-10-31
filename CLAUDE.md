@@ -33,15 +33,18 @@ app ("the bridge", `apps-script/K9AppBridge.gs`).
   When the bridge gains something useful, bump `BRIDGE_VERSION` in the bridge and `BRIDGE_LATEST` in
   `src/js/00-core.js` (the app then suggests the update). Bump `NEED_BRIDGE` only when the app can't work without it.
 - Keep UI text plain and short. Keep keyboard access, focus handling and the high-contrast mode working.
-- The phone version keeps only its connection and display settings on the phone. Never cache records or documents
-  in the browser; the service worker keeps only the app's own files, each checked against its build fingerprint.
+- The phone version keeps only its connection and display settings on the phone (plus which version's "What's new"
+  it last showed). Never cache records or documents in the browser; the service worker keeps only the app's own
+  files, each checked against its build fingerprint.
   The connection code is plain text (`K9SALON:1:…`) read by the in-app scanner, never a link, so the key stays out
   of browser history. A key put in the address is removed at load and never used.
 - Anything the phone can't do (serial scanners, updating the bridge, printing straight to a PDF file) is hidden or
   explained when `WEB` is true; check new features at phone width (390 px) as well as on the desktop.
 
 ## Releases (maintainer only)
-Bump `version` in `package.json`, add a `## x.y.z` section to `CHANGELOG.md`, and commit to `main`. The release
+Bump `version` in `package.json`, add a `## x.y.z` section to `CHANGELOG.md`, and commit to `main`. The build fails
+if the newest section isn't the package version. The newest sections are built into the app and shown to users as
+"What's new" after they update, so write them for kennel staff: plain words, no developer notes. The release
 workflow sees the new version, builds the installer and publishes `vx.y.z` with `latest.json`, which installed apps
 read to update themselves. If the `release` environment has a required reviewer, it waits for their approval.
 After the release, it publishes the phone version to GitHub Pages (`pages.yml`; needs Settings → Pages → Source:

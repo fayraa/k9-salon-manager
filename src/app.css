@@ -456,6 +456,29 @@ td .before{text-decoration:line-through;color:var(--muted)}
 .dc-h .nm{font-size:17px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dogcard small{color:var(--muted);font-size:14px}
 .dc-f{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+/* history */
+.hday{display:grid;gap:10px}
+.hday + .hday{margin-top:18px}
+.hist{list-style:none;margin:0;padding:0;overflow:hidden}
+.he{padding:12px 18px;border-top:1px solid var(--line);display:grid;gap:4px;min-width:0}
+.he:first-child{border-top:0}
+.he-h{display:flex;gap:12px;align-items:baseline;min-width:0}
+.he-t{flex:1;min-width:0;overflow-wrap:anywhere;line-height:1.45}
+.he-h time{flex:none;color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
+.he-ch{list-style:none;margin:2px 0 0;padding:0;display:grid;gap:3px;font-size:15px;overflow-wrap:anywhere}
+.he-ch .f{color:var(--muted)}
+.he-ch .f::after{content:":"}
+.he-ch .before{text-decoration:line-through;color:var(--muted)}
+.he-sum,.he-w{margin:0;color:var(--muted);font-size:14.5px;overflow-wrap:anywhere}
+.he-w{font-size:13.5px}
+/* what's new */
+.news{display:grid;gap:18px}
+.news section{display:grid;gap:6px}
+.news h3{margin:0;font-size:18px;font-weight:800}
+.news .nh{margin:6px 0 0;font-size:15px;font-weight:800;color:var(--muted)}
+.news p{margin:0}
+.news ul{margin:0;padding-left:20px;display:grid;gap:5px}
+.news code{font-family:var(--f-mono);font-size:.92em}
 .loglist{list-style:none;margin:0;padding:0;display:grid;overflow:hidden}
 .loglist li:first-child .li{border-top:0}
 .li.nodate{grid-template-columns:minmax(0,1fr) auto}

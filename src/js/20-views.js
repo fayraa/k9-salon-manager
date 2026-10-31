@@ -143,12 +143,14 @@ function kennelList() {
     const no = String(cell(t, r, 'Kennel No.')).trim();
     if (!no) continue;
     const capRaw = cell(t, r, 'Capacity');
-    out.push({ no, block: cell(t, r, 'Block'), capacity: capRaw !== '' && isFinite(+capRaw) ? +capRaw : null, type: cell(t, r, 'Type'), notes: cell(t, r, 'Notes'), row: r });
+    out.push({ no, capacity: capRaw !== '' && isFinite(+capRaw) ? +capRaw : null, type: cell(t, r, 'Type'), notes: cell(t, r, 'Notes'), row: r });
   }
   const known = new Set(out.map(k => k.no));
   const extra = Array.from(new Set(DOGS.filter(isActive).map(d => d.kennel).filter(k => k && !known.has(k))));
-  extra.forEach(no => out.push({ no, block: '', capacity: null, type: '', notes: '', missing: true }));
-  return out.sort((a, b) => (a.block || '~').localeCompare(b.block || '~') || (parseFloat(a.no) - parseFloat(b.no)) || a.no.localeCompare(b.no));
+  extra.forEach(no => out.push({ no, capacity: null, type: '', notes: '', missing: true }));
+  // kennels are one list in number order (the sheet's Block column, if it has one, isn't used)
+  const num = k => (isFinite(parseFloat(k.no)) ? parseFloat(k.no) : Infinity);
+  return out.sort((a, b) => (num(a) - num(b)) || a.no.localeCompare(b.no, undefined, { numeric: true }));
 }
 function kennelsHTML() {
   const ks = kennelList();
@@ -156,8 +158,6 @@ function kennelsHTML() {
   const by = {};
   active.forEach(d => { if (d.kennel) (by[d.kennel] = by[d.kennel] || []).push(d); });
   const none = active.filter(d => !d.kennel);
-  const blocks = {};
-  ks.forEach(k => (blocks[k.block || 'No block'] = blocks[k.block || 'No block'] || []).push(k));
   const card = k => {
     const dogs = (by[k.no] || []).sort((a, b) => dogName(a).localeCompare(dogName(b)));
     const n = dogs.length;
@@ -173,7 +173,7 @@ function kennelsHTML() {
   };
   if (!ks.length) return `<div class="empty"><h2>No kennels yet</h2><p>Add kennels in the Kennels tab (Records → Farm → Kennels) and give each dog a kennel number.</p><div class="row"><button class="btn primary" data-action="new-entry" data-tab="Kennels">${icon('plus')}Add a kennel</button></div></div>`;
   return `${none.length ? `<div class="note">${icon('info')}<span>${plural(none.length, 'active dog has', 'active dogs have')} no kennel number. Fill them all in at once, or use <b>Move a dog here</b> on a kennel.</span><button class="btn sm" data-action="quick-fill" data-preset="kennel">${icon('sheet')}Fill in kennels</button></div>` : ''}
-    ${Object.keys(blocks).map(b => `<section class="grid" style="gap:12px"><h2 class="sec-title">${esc(b)}</h2><div class="kennels">${blocks[b].map(card).join('')}</div></section>`).join('')}`;
+    <div class="kennels">${ks.map(card).join('')}</div>`;
 }
 function openMoveDog(kennel) {
   const options = DOGS.filter(isActive).map(d => `<option value="${esc(d.chip || 'id:' + d.id)}">${esc(`${dogLabel(d)} · now in ${d.kennel ? 'kennel ' + d.kennel : 'no kennel'}`)}</option>`).join('');
@@ -261,7 +261,7 @@ function logTableHTML() {
   const dc = L.date ? t.idx.get(L.date) : undefined;
   let rows = t.rows.filter(r => !q || r.v.join(' ').toLowerCase().includes(q));
   if (dc != null) rows = rows.slice().sort((a, b) => (parseDate(b.v[dc]) || 0) - (parseDate(a.v[dc]) || 0));
-  const cols = t.headers.map((h, c) => ({ h, c })).filter(x => x.h);
+  const cols = t.headers.map((h, c) => ({ h, c })).filter(x => x.h && !hiddenCol(L, x.h));
   if (t.rows.length && isPhone()) {
     // on a phone: one line per entry, newest first, with the dog's name when the entry has a microchip
     const items = rows.map(r => {
