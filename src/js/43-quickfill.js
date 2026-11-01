@@ -2,7 +2,7 @@
 const QF_CHUNK = 40; // dogs per request, so each save stays well inside Google's time limit
 const QF_PRESETS = [
   { id: 'licence', label: 'Licence number and expiry', cols: ['PALS Licence No.', 'Licence Expiry'], issue: 'licence' },
-  { id: 'kennel', label: 'Kennel', cols: ['Kennel No.'], which: 'blank-active' },
+  { id: 'kennel', label: 'Kennel', cols: ['Kennel No.'], which: 'blank-here' },
   { id: 'sterilised', label: 'Sterilised', cols: ['Sterilised'], issue: 'sterilise' },
   { id: 'status', label: 'Status', cols: ['Status'], which: 'retired' },
   { id: 'chip', label: 'Microchip number', cols: ['Microchip No.'], issue: 'chip' },
@@ -111,6 +111,7 @@ function qfWhichHTML(st) {
   return [
     ...(p && p.issue ? [['todo', `Flagged: ${ISSUE[p.issue].label}`]] : []),
     ['blank-active', 'Active dogs with a blank box'],
+    ['blank-here', 'Dogs living here with a blank box'],
     ['blank', 'Any dog with a blank box'],
     ['active', 'All active dogs'],
     ['retired', 'Retired dogs'],
@@ -126,7 +127,8 @@ function qfList(st, t) {
   return DOGS.filter(d => {
     if (st.which === 'todo' && !(issue && d.issues.some(i => i.k === issue))) return false;
     if ((st.which === 'blank-active' || st.which === 'active') && !isActive(d)) return false;
-    if ((st.which === 'blank-active' || st.which === 'blank') && !blank(d)) return false;
+    if (st.which === 'blank-here' && !atKennel(d)) return false;
+    if ((st.which === 'blank-active' || st.which === 'blank' || st.which === 'blank-here') && !blank(d)) return false;
     if (st.which === 'retired' && !isRetired(d)) return false;
     if (q && !`${d.id} ${d.name} ${d.breed}`.toLowerCase().includes(q) && !(qd.length >= 3 && d.chip.includes(qd))) return false;
     return true;
