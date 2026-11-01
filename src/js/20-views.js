@@ -146,7 +146,7 @@ function kennelList() {
     out.push({ no, capacity: capRaw !== '' && isFinite(+capRaw) ? +capRaw : null, row: r });
   }
   const known = new Set(out.map(k => k.no));
-  const extra = Array.from(new Set(DOGS.filter(isActive).map(d => d.kennel).filter(k => k && !known.has(k))));
+  const extra = Array.from(new Set(DOGS.filter(atKennel).map(d => d.kennel).filter(k => k && !known.has(k))));
   extra.forEach(no => out.push({ no, capacity: null, missing: true }));
   // kennels are one list in number order, shown by number only (the sheet's Block and Type columns aren't used)
   const num = k => (isFinite(parseFloat(k.no)) ? parseFloat(k.no) : Infinity);
@@ -154,10 +154,11 @@ function kennelList() {
 }
 function kennelsHTML() {
   const ks = kennelList();
-  const active = DOGS.filter(isActive);
+  // every dog living here, retired ones included; dogs that died or left aren't in a kennel any more
+  const here = DOGS.filter(atKennel);
   const by = {};
-  active.forEach(d => { if (d.kennel) (by[d.kennel] = by[d.kennel] || []).push(d); });
-  const none = active.filter(d => !d.kennel);
+  here.forEach(d => { if (d.kennel) (by[d.kennel] = by[d.kennel] || []).push(d); });
+  const none = here.filter(d => !d.kennel);
   const card = k => {
     const dogs = (by[k.no] || []).sort((a, b) => dogName(a).localeCompare(dogName(b)));
     const n = dogs.length;
@@ -172,18 +173,18 @@ function kennelsHTML() {
     </section>`;
   };
   if (!ks.length) return `<div class="empty"><h2>No kennels yet</h2><p>Add kennels in the Kennels tab (Records → Farm → Kennels) and give each dog a kennel number.</p><div class="row"><button class="btn primary" data-action="new-entry" data-tab="Kennels">${icon('plus')}Add a kennel</button></div></div>`;
-  return `${none.length ? `<div class="note">${icon('info')}<span>${plural(none.length, 'active dog has', 'active dogs have')} no kennel number. Fill them all in at once, or use <b>Move a dog here</b> on a kennel.</span><button class="btn sm" data-action="quick-fill" data-preset="kennel">${icon('sheet')}Fill in kennels</button></div>` : ''}
+  return `${none.length ? `<div class="note">${icon('info')}<span>${plural(none.length, 'dog has', 'dogs have')} no kennel number. Fill them all in at once, or use <b>Move a dog here</b> on a kennel.</span><button class="btn sm" data-action="quick-fill" data-preset="kennel">${icon('sheet')}Fill in kennels</button></div>` : ''}
     <div class="kennels">${ks.map(card).join('')}</div>`;
 }
 function openMoveDog(kennel) {
-  const options = DOGS.filter(isActive).map(d => `<option value="${esc(d.chip || 'id:' + d.id)}">${esc(`${dogLabel(d)} · now in ${d.kennel ? 'kennel ' + d.kennel : 'no kennel'}`)}</option>`).join('');
+  const options = DOGS.filter(atKennel).map(d => `<option value="${esc(d.chip || 'id:' + d.id)}">${esc(`${dogLabel(d)} · now in ${d.kennel ? 'kennel ' + d.kennel : 'no kennel'}`)}</option>`).join('');
   const o = modal('move', {
     title: `Move a dog to kennel ${kennel}`, narrow: true, form: true,
     body: `<div class="form-grid one"><div class="field"><label for="mv-dog">Dog</label><input class="inp" id="mv-dog" list="mv-dogs" placeholder="Type a name, ID or microchip, or scan" autocomplete="off"><datalist id="mv-dogs">${options}</datalist><span class="hint" id="mv-hint">Pick from the list</span></div></div>`,
     foot: `<span class="msg" id="mv-msg"></span><button type="button" class="btn" data-action="close-top">Cancel</button><button type="submit" class="btn primary">Move dog</button>`,
   });
   const input = $('#mv-dog', o.el);
-  const resolve = () => { const v = input.value.trim(); return v.startsWith('id:') ? BYID.get(v.slice(3)) : findDog(v) || DOGS.find(d => isActive(d) && (dogLabel(d).toLowerCase() === v.toLowerCase() || d.id.toLowerCase() === v.toLowerCase())); };
+  const resolve = () => { const v = input.value.trim(); return v.startsWith('id:') ? BYID.get(v.slice(3)) : findDog(v) || DOGS.find(d => atKennel(d) && (dogLabel(d).toLowerCase() === v.toLowerCase() || d.id.toLowerCase() === v.toLowerCase())); };
   input.addEventListener('input', () => { const d = resolve(); $('#mv-hint', o.el).textContent = d ? `${dogLabel(d)} · ${d.kennel ? 'kennel ' + d.kennel : 'no kennel'} now` : 'Pick from the list'; });
   $('form', o.el).addEventListener('submit', async e => {
     e.preventDefault();

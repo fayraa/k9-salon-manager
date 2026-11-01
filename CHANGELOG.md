@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.1
+
+**Changed**
+- **Kennels** show every dog living at the kennel, retired dogs included. Before, only active dogs were shown. Dogs that have died, been sold, adopted or transferred aren't shown. **Move a dog here** and **Fill in kennels** include retired dogs too.
+
 ## 1.5.0
 
 **New**

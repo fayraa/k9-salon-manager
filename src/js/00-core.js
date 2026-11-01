@@ -296,6 +296,9 @@ function rebuild() {
 const findDog = (chip, id) => (chip && BYCHIP.get(normChip(chip))) || (id && BYID.get(id)) || null;
 const evsFor = (chip, tab, role) => !chip ? [] : (IDX.byChip.get(chip) || []).filter(x => (!tab || x.ev.L.tab === tab) && (role == null || x.role === role)).map(x => x.ev).filter((e, i, a) => a.indexOf(e) === i).sort((a, b) => (b.date || 0) - (a.date || 0));
 const isActive = d => /^active/i.test(d.status);
+/** Still living at the kennel: active and retired dogs (and any with no status yet), not ones that died or left. */
+const GONE = /^(deceased|dead|died|sold|adopted|transferred|rehomed|exported)/i;
+const atKennel = d => !GONE.test(String(d.status || '').trim());
 const isRetired = d => /retired/i.test(d.status);
 const isAdopted = d => /^adopted/i.test(d.status);
 const isFemale = d => /^f/i.test(d.sex);

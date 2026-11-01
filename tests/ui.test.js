@@ -573,7 +573,7 @@ test('quick fill saves a long list in groups, and a group Google didn’t confir
   await page.click('[data-action="dogs-mode"][data-mode="kennels"]');
   await page.click('[data-action="quick-fill"][data-preset="kennel"]');
   await page.waitForSelector('.qf-table');
-  assert.equal(await page.inputValue('#qf-which'), 'blank-active');
+  assert.equal(await page.inputValue('#qf-which'), 'blank-here', 'every dog living here, retired ones too');
   assert.equal(await page.locator('.qf-table tbody tr').count(), 71, 'the new dogs and the unnamed puppy have no kennel');
   await page.selectOption('#qf-fill-0', '3');
   await page.click('[data-qf-fill="0"]');
@@ -1050,6 +1050,7 @@ test('kennels are one list in number order, shown by number only: no blocks or l
   const k = read.tabs['Kennels'];
   k.rows = [['10', 'Block A', 2, 'Breeding'], ['2', 'Block B', 3, 'Breeding'], ['1', 'Block B', 3, 'Whelping'], ['3', '', 2, 'Isolation', 'Sick dogs']].map((v, i) => ({ r: i + 2, v }));
   k.lastRow = 5;
+  read.tabs['All Breeds'].rows.find(r => r.v[2] === 'Kiwi').v[11] = 'Deceased';
   const { page, errors, ctx } = await openApp({ read });
   await page.click('.nav button[data-view="dogs"]');
   await page.click('[data-action="dogs-mode"][data-mode="kennels"]');
@@ -1061,6 +1062,16 @@ test('kennels are one list in number order, shown by number only: no blocks or l
   assert.equal(await page.locator('.kennel .kn-h .pill').count(), 0, 'no labels or warnings on a kennel');
   assert.doesNotMatch(await page.textContent('#view'), /Over capacity/);
   assert.equal(await page.textContent('.kennel:has(h3:text-is("Kennel 1")) .kn-cap'), '5 of 3', 'the count still shows how full it is');
+  // every dog living here is in its kennel, retired ones too; a dog that died isn't
+  const inKennel = async no => (await page.locator(`.kennel:has(h3:text-is("Kennel ${no}")) .dogchip`).allTextContents()).map(t => t.replace(/[FM]$/, ''));
+  assert.ok((await inKennel(3)).includes('Hazel'), 'retired Hazel is in kennel 3');
+  assert.ok((await inKennel(4)).includes('Juniper'), 'retired Juniper is in kennel 4');
+  assert.ok((await inKennel(2)).includes('Olive'), 'a dog with no status yet is shown too');
+  assert.ok(!(await inKennel(2)).includes('Kiwi'), 'a dog that died isn’t in a kennel any more');
+  await page.click('.kennel:has(h3:text-is("Kennel 1")) [data-action="move-dog"]');
+  const choices = await page.locator('#mv-dogs option').evaluateAll(os => os.map(o => o.textContent));
+  assert.ok(choices.some(t => /Hazel/.test(t)) && !choices.some(t => /Kiwi/.test(t)), 'Move a dog here offers the dogs living here');
+  await page.keyboard.press('Escape');
   // the Kennels tab: no Block column in the list or the form, and the cell in the sheet is left alone
   await page.click('.nav button[data-view="records"]');
   await page.click('[data-action="nav"][data-view="log"][data-tab="Kennels"]');
